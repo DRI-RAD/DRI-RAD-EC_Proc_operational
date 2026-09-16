@@ -328,7 +328,7 @@ if(!is.na(dirs_use$dir_BulkP)){
 					 )
 	
 	# figure
-	a <- BulkP %>% 
+	a <- pipeline_figure_data(BulkP) %>%
 		ggplot(aes(TIMESTAMP)) +
 		theme_bw() +
 		geom_point(aes(y = P_raw, color = "raw"), size = 2) +
@@ -338,7 +338,7 @@ if(!is.na(dirs_use$dir_BulkP)){
 				 ) +
 		scale_color_manual(values = c("black","red"))
 	
-	b <- BulkP %>% 
+	b <- pipeline_figure_data(BulkP) %>%
 		ggplot(aes(TIMESTAMP)) +
 		theme_bw() +
 		geom_line(aes(y = cum_signal, color = "sensor output"), linewidth = 1, lty = 2) +
@@ -895,8 +895,8 @@ key_vars <- c("SW_IN","SW_OUT","PPFD_IN",
               "SWC_1_1_1","SWC_1_1_2","SWC_1_1_3", "WS_05103_mean")
 
 plot_qc_compare_pdf(
-	df_orig = df_orig,
-	df = df,
+	df_orig = pipeline_figure_data(df_orig),
+	df = pipeline_figure_data(df),
 	vars = key_vars,
 	file_out = paste0(pipeline_path(base_dir, dirs_use$dir_output), "/figures/", site_id, "_Level_1_Figure_met_QAQC.pdf"),
 	chunk_size = 48 * 365,
@@ -907,8 +907,8 @@ plot_qc_compare_pdf(
 
 
 plot_qc_compare_pdf(
-  df_orig = df_orig,
-  df = df,
+  df_orig = pipeline_figure_data(df_orig),
+  df = pipeline_figure_data(df),
   vars = "SW_IN",
   file_out = paste0(pipeline_path(base_dir, dirs_use$dir_output), "/figures/", site_id, "_Level_1_Figure_met_QAQC_SW_IN_details.pdf"),
   chunk_size = 48 * 14,

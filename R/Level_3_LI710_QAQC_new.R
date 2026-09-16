@@ -64,34 +64,13 @@ met_unit <- met_unit %>% select(TIMESTAMP, PotRad)
 #### Load LI710 
 ################################################################################
 
-if(!is.na(dirs_use$dir_LI710_old)){ 
-  ### Load LI710 old data
-  LI710_unit_old <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710_old),skip = 1, n_max = 2)
-  LI710_old <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710_old),skip = 4, col_names = F)
-  colnames(LI710_old) <- colnames(LI710_unit_old)
-  # Restrict input to the requested calculation window before processing.
-  LI710_old <- pipeline_slice(LI710_old)
-  
-  ### Load LI710 data
-  LI710_unit <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 1, n_max = 2)
-  LI710 <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 4, col_names = F)
-  colnames(LI710) <- colnames(LI710_unit)
-  # Restrict input to the requested calculation window before processing.
-  LI710 <- pipeline_slice(LI710)
-  
-  LI710 <- full_join(LI710_old, LI710)
-  LI710_unit <- full_join(LI710_unit_old, LI710_unit)
-  
-} else{
-  ### Load LI710 data
-  LI710_unit <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 1, n_max = 2)
-  LI710 <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 4, col_names = F)
-  colnames(LI710) <- colnames(LI710_unit)  
-  # Restrict input to the requested calculation window before processing.
-  LI710 <- pipeline_slice(LI710)
-  
-}
-
+# The runner and this stage use the same discovered source-file set and rules.
+li710_input <- pipeline_options$li710
+if (is.null(li710_input)) li710_input <- pipeline_li710_read(pipeline_li710_files(dirs_use, base_dir))
+LI710 <- li710_input$data
+LI710 <- LI710[LI710$TIMESTAMP >= pipeline_options$window$read_start &
+                 LI710$TIMESTAMP < pipeline_options$window$end + 1800, ]
+LI710_unit <- li710_input$units
 LI710[LI710==9999999] <- NA
 LI710[LI710==-9999] <- NA
 
@@ -165,9 +144,9 @@ if(site_id %in% c('EDVG', 'ERVA')){
 }
 
 # despike + physical range filtering
-LI710$LE_710_QC_despike <- despikeLF(as.data.frame(LI710 %>% mutate(timestamp = TIMESTAMP)),
+LI710$LE_710_QC_despike <- pipeline_li710_despike(as.data.frame(LI710 %>% mutate(timestamp = TIMESTAMP)),
 															"LE_710",iter = 10,light = "PotRad", z = 10, var_thr = LE_range)
-LI710$H_710_QC_despike <- despikeLF(as.data.frame(LI710 %>% mutate(timestamp = TIMESTAMP)),
+LI710$H_710_QC_despike <- pipeline_li710_despike(as.data.frame(LI710 %>% mutate(timestamp = TIMESTAMP)),
 														 "H_710",iter = 10,light = "PotRad", z = 10, var_thr = H_range)
 
 
@@ -248,7 +227,19 @@ plot_flux_qc_pdf <- function(df,
 		)
 	
 	if (nrow(df_good) == 0 || all(is.na(df_good[[var]]))) {
-		stop("No valid good-quality data found for ", var)
+		# Missing or rejected observations are a valid diagnostic outcome.
+		# Save an explicit status page instead of aborting the data publication.
+		grDevices::pdf(file_out, width = 12, height = 7, useDingbats = FALSE)
+		on.exit(grDevices::dev.off(), add = TRUE)
+		graphics::plot.new()
+		graphics::title(main = paste(site_id, var, "QAQC status"))
+		graphics::text(0.5, 0.65, "No observations passed all QC tests in this period.")
+		graphics::text(0.5, 0.5, paste("Rows:", nrow(df),
+			"| Available flux:", sum(is.finite(df[[var]])),
+			"| Missing despike flags:", sum(is.na(df[[qc_despike]]))))
+		if (nrow(df)) graphics::text(0.5, 0.35,
+			paste(format(min(df$TIMESTAMP)), "to", format(max(df$TIMESTAMP))))
+		return(invisible(file_out))
 	}
 	
 	y_rng <- range(df_good[[var]], na.rm = TRUE)
@@ -399,10 +390,10 @@ plot_flux_qc_pdf <- function(df,
 }
 
 
-plot_flux_qc_pdf(LI710, var = "LE_710", 
+plot_flux_qc_pdf(pipeline_figure_data(LI710), var = "LE_710",
 								 file_out = paste0(pipeline_path(base_dir, dirs_use$dir_output),"/figures/",site_id,"_Level_3_LE_710_flag.pdf")
 )
-plot_flux_qc_pdf(LI710, var = "H_710", 
+plot_flux_qc_pdf(pipeline_figure_data(LI710), var = "H_710",
 								 file_out = paste0(pipeline_path(base_dir, dirs_use$dir_output),"/figures/",site_id,"_Level_3_H_710_flag.pdf")
 )
 

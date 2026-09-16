@@ -8,6 +8,8 @@ if (!length(.pipeline_script) || is.na(.pipeline_script)) {
 }
 .pipeline_root <- dirname(normalizePath(.pipeline_script, winslash = "/", mustWork = TRUE))
 source(file.path(.pipeline_root, "R", "pipeline_io.R"))
+source(file.path(.pipeline_root, "R", "pipeline_li710.R"))
+source(file.path(.pipeline_root, "R", "pipeline_level4_figures.R"))
 
 pipeline_stages <- c(
   L1 = "R/Level_1_met_QAQC_new.R",
@@ -24,53 +26,28 @@ pipeline_patterns <- c(
   L4 = "Level_4_post_processed_data"
 )
 
-pipeline_publish <- function(staging, output, pattern, window, reprocess) {
-  produced <- pipeline_files(staging, pattern)
-  # Upstream files in staging have a different stage pattern.
-  if (length(produced) != 1L) stop("Expected one final stage output: ", pattern)
-  fresh <- pipeline_read_table(produced)
-  if (!all(window$pending %in% fresh$data$TIMESTAMP))
-    stop("Stage did not produce every planned timestamp; output was not committed.")
-  history <- pipeline_history(output, pattern)
-  data <- fresh$data
-  if (!is.null(history)) {
-    if (!setequal(names(history$data), names(data))) stop("Historical output schema differs: ", pattern)
-    old <- history$data
-    if (reprocess) old <- old[!old$TIMESTAMP %in% data$TIMESTAMP, ]
-    else if (any(data$TIMESTAMP %in% old$TIMESTAMP)) stop("Unexpected overlap during append.")
-    data <- dplyr::bind_rows(old, data)
-  }
-  data <- data[order(data$TIMESTAMP), ]
-  version <- basename(tempfile(paste0(format(Sys.time(), "%Y%m%dT%H%M%S"), "-")))
-  site <- sub(paste0("_", pattern, ".*"), "", basename(produced), ignore.case = TRUE)
-  target <- file.path(output, paste0(site, "_", pattern, "_", version, ".csv"))
-  pipeline_write_table(data, fresh$units, target, "Cumulative processed output; prior rows preserved outside the requested update.")
-  # The final CSV is the checkpoint. Audit metadata is informative, never the
-  # authority for skipping data after interruption or an incomplete write.
-  audit <- data.frame(stage = pattern, output = basename(target),
-                      first_timestamp = min(data$TIMESTAMP), last_timestamp = max(data$TIMESTAMP),
-                      new_first = min(fresh$data$TIMESTAMP), new_last = max(fresh$data$TIMESTAMP),
-                      new_rows = nrow(fresh$data), total_rows = nrow(data),
-                      context_start = window$read_start, reprocess = reprocess)
-  readr::write_csv(audit, paste0(target, ".period.csv"))
-  # Keep diagnostics per run so old figures are not silently replaced.
-  diagnostics <- file.path(output, "runs", version)
-  dir.create(diagnostics, recursive = TRUE, showWarnings = FALSE)
-  file.copy(list.files(staging, full.names = TRUE), diagnostics, recursive = TRUE)
-  message("Committed ", pattern, ": ", nrow(fresh$data), " rows -> ", target)
-  target
-}
+source(file.path(.pipeline_root, "R", "pipeline_publication.R"))
 
 run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM"), start = NULL, end = NULL,
                          base_dir = "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations",
                          config_file = file.path(.pipeline_root, "meta_files", "file_directions_new.csv"),
                          stages = names(pipeline_stages), reference_sites = NULL,
-                         context_days = 0, reprocess = FALSE, dry_run = FALSE) {
+                         context_days = 0, reprocess = FALSE, dry_run = FALSE,
+                         min_mds_days = 100, figure_period = "new") {
   # start/end are inclusive half-hour observation timestamps, not file dates.
   # context_days adds preceding observations for boundary calculations only;
   # already-processed values are never rewritten unless reprocess = TRUE.
   if (!is.numeric(context_days) || length(context_days) != 1L ||
       !is.finite(context_days) || context_days < 0) stop("context_days must be nonnegative.")
+  if (!is.numeric(min_mds_days) || length(min_mds_days) != 1L ||
+      !is.finite(min_mds_days) || min_mds_days < 90 || min_mds_days != floor(min_mds_days))
+    stop("min_mds_days must be a whole number of at least 90; default is 100.")
+  if (!identical(figure_period, "new")) stop('figure_period must be "new"; figures describe only pending timestamps.')
+  # Resolve caller-supplied paths before changing to the project directory.
+  if (length(base_dir) != 1L || is.na(base_dir) || !nzchar(base_dir) || !dir.exists(base_dir))
+    stop("base_dir is not an accessible data root: ", base_dir)
+  base_dir <- normalizePath(base_dir, winslash = "/", mustWork = TRUE)
+  config_file <- normalizePath(config_file, winslash = "/", mustWork = TRUE)
   if (reprocess && (is.null(start) || is.null(end))) stop("Reprocessing requires explicit start and end.")
   if (!is.null(start)) start <- pipeline_time(start)
   if (!is.null(end)) end <- pipeline_time(end)
@@ -114,12 +91,10 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
     row <- dirs[dirs$site == site, ]
     if ("L1" %in% stages) logger[[site]] <- pipeline_raw_times(pipeline_path(base_dir, row$dir_met))
     if ("L3_EC" %in% stages) eddy[[site]] <- pipeline_eddypro(pipeline_path(base_dir, row$dir_eddypro))
-    if (any(c("L3_LI710", "L4") %in% stages) && is.na(row$dir_LI710))
-      stop("The existing LI710/Level 4 algorithms require LI710 input for ", site)
     if ("L3_LI710" %in% stages) {
-      t <- pipeline_raw_times(pipeline_path(base_dir, row$dir_LI710))
-      if (!is.na(row$dir_LI710_old)) t <- c(t, pipeline_raw_times(pipeline_path(base_dir, row$dir_LI710_old)))
-      li710[[site]] <- sort(unique(lubridate::floor_date(t, "30 minutes")))
+      files <- pipeline_li710_files(row, base_dir)
+      li710[[site]] <- pipeline_li710_read(files)
+      message(site, ": discovered ", length(files), " LI710 source files.")
     }
   }
   results <- list()
@@ -139,7 +114,7 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
         L2 = times_for(site, "L1"),
         L3_EC = intersect(as.numeric(times_for(site, "L1")), as.numeric(times_for(site, "L2"))),
         L3_LI710 = times_for(site, "L1"),
-        L4 = Reduce(intersect, lapply(c("L1", "L2", "L3_EC", "L3_LI710"),
+        L4 = Reduce(intersect, lapply(c("L1", "L2", "L3_EC"),
                                       function(s) as.numeric(times_for(site, s))))
       )
       if (is.numeric(available) && !inherits(available, "POSIXt"))
@@ -150,13 +125,16 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
       # Stop at the flux source's actual coverage. Internal missing observations
       # remain in the regular grid for the original fallback/gap-filling logic.
       if (stage %in% c("L3_EC", "L3_LI710")) {
-        raw_times <- if (stage == "L3_EC") eddy[[site]]$data$TIMESTAMP else li710[[site]]
-        available <- available[available >= min(raw_times) & available <= max(raw_times)]
+        raw_times <- if (stage == "L3_EC") eddy[[site]]$data$TIMESTAMP else lubridate::floor_date(li710[[site]]$data$TIMESTAMP, "30 minutes")
+        available <- if (length(raw_times)) available[available >= min(raw_times) & available <= max(raw_times)] else available[FALSE]
       }
       window <- pipeline_plan(available, history_for(site, stage), start, end, context_days, reprocess)
+      if (stage == "L4") window <- pipeline_mds_window(window, available, min_mds_days)
       key <- paste(site, stage, sep = ":")
       if (is.null(window)) {
-        message(key, ": no unprocessed timestamps.")
+        if (stage == "L3_LI710" && !length(raw_times))
+          message(key, ": no LI710 source observations; L4 may continue with EC only.")
+        else message(key, ": no unprocessed timestamps.")
         results[[key]] <- "skipped"
       } else {
         message(key, ": ", length(window$pending), " pending rows; ", window$start, " through ", window$end,
@@ -179,8 +157,12 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
               stage_dirs$dir_output[stage_dirs$site == ref] <- folder
               for (up in upstream) {
                 item <- history_for(ref, up)
+                if (up == "L3_LI710" && stage == "L4" && is.null(item))
+                  item <- pipeline_empty_li710(seq(window$read_start, window$end, by = 1800))
                 if (is.null(item)) stop("Missing ", up, " reference input for ", ref)
                 item$data <- pipeline_slice(item$data, window)
+                if (!nrow(item$data) && up == "L3_LI710" && stage == "L4")
+                  item <- pipeline_empty_li710(seq(window$read_start, window$end, by = 1800))
                 if (!nrow(item$data)) stop("Reference input has no data in this window: ", ref)
                 pipeline_write_table(item$data, item$units,
                     file.path(folder, paste0(ref, "_", pipeline_patterns[[up]], "_input.csv")),
@@ -188,13 +170,11 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
               }
             }
             options(ec.pipeline = list(dirs = stage_dirs, base_dir = base_dir,
-                sites = site, reference_sites = refs, window = window, eddypro = eddy[[site]]))
+                sites = site, reference_sites = refs, window = window, eddypro = eddy[[site]],
+                li710 = li710[[site]], min_mds_days = min_mds_days, figure_period = figure_period,
+                figure_dir = file.path(staging_root, site, "figures")))
             env <- new.env(parent = environment(run_pipeline))
-            # Route automatic R plots into staging, preserving the interactive device.
-            grDevices::pdf(file.path(staging_root, site, "figures", "automatic_plots.pdf"))
-            plot_device <- grDevices::dev.cur()
-            tryCatch(sys.source(file.path(.pipeline_root, pipeline_stages[[stage]]), envir = env),
-                     finally = { if (plot_device %in% grDevices::dev.list()) grDevices::dev.off(plot_device) })
+            sys.source(file.path(.pipeline_root, pipeline_stages[[stage]]), envir = env)
             results[[key]] <- pipeline_publish(file.path(staging_root, site), output,
                                                pipeline_patterns[[stage]], window, reprocess)
           }, finally = unlink(staging_root, recursive = TRUE))

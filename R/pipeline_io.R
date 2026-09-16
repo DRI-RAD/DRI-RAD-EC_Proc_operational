@@ -1,6 +1,42 @@
 # Shared ingestion, period planning, and versioned output for the new pipeline.
 # Scientific QAQC and gap-filling calculations remain in the Level_*_new.R files.
 
+# openeddy's internal desp_loop cannot handle an empty day/night subset and
+# stops when too few second differences are available. Guard only those cases
+# in a private function environment; never modify the installed package.
+pipeline_despike <- function(x, var, ...) {
+  implementation <- openeddy::despikeLF
+  package_env <- environment(implementation)
+  original_loop <- get("desp_loop", envir = package_env)
+  skipped <- integer()
+  guarded_loop <- function(SD_sub, date, nVals, z, c, plot = FALSE) {
+    values <- SD_sub$var
+    n <- length(values)
+    differences <- if (n >= 3L)
+      (values[2:(n-1)] - values[1:(n-2)]) - (values[3:n] - values[2:(n-1)]) else numeric()
+    if (sum(!is.na(differences)) <= nVals) {
+      skipped <<- union(skipped, SD_sub$Index)
+      # Spike remains NA for unassessed observations. Already detected spikes
+      # and physical-range flags are preserved by the outer openeddy function.
+      if (plot) return(list(SD = SD_sub, plots = list()))
+      return(SD_sub)
+    }
+    original_loop(SD_sub, date, nVals, z, c, plot)
+  }
+  local_env <- new.env(parent = package_env)
+  local_env$desp_loop <- guarded_loop
+  environment(implementation) <- local_env
+  result <- implementation(x, var, ...)
+  if (length(skipped)) warning(
+    var, ": insufficient observations for statistical despiking in one or more day/night subsets (",
+    length(skipped), " rows). Unassessed flags remain NA; physical-range flags are retained.",
+    call. = FALSE)
+  result
+}
+
+# Backward-compatible name for the LI710 adapter.
+pipeline_li710_despike <- pipeline_despike
+
 pipeline_time <- function(x) {
   if (inherits(x, "POSIXt")) return(as.POSIXct(x, tz = "UTC"))
   # UTC is a fixed clock label, matching the original logger scripts. No DST shift.
@@ -172,6 +208,46 @@ pipeline_plan <- function(available, history, start = NULL, end = NULL,
   if (!length(available)) return(NULL)
   list(start = min(available), end = max(available), pending = available,
        read_start = min(available) - context_days * 86400)
+}
+
+# Expand Level 4 backwards to at least min_days of half-hour observations.
+# Historical QAQC inputs provide training context; pending timestamps never change.
+pipeline_mds_window <- function(window, available, min_days = 100) {
+  if (is.null(window)) return(NULL)
+  required_start <- window$end - min_days * 86400 + 1800
+  window$read_start <- min(window$read_start, required_start)
+  # Align the first observation to the end of a day's first half-hour.
+  window$read_start <- as.POSIXct(as.Date(window$read_start - 1800, tz = "UTC"), tz = "UTC") + 1800
+  expected <- seq(window$read_start, window$end, by = 1800)
+  missing <- expected[!expected %in% available]
+  if (length(missing)) stop(
+    "Insufficient Level 4 context: need common L1/L2/L3_EC timestamps from ",
+    window$read_start, " through ", window$end, ". Missing ", length(missing),
+    " rows (first: ", missing[1], "). Process the missing upstream period first with ",
+    "stages = c('L1', 'L2', 'L3_EC'), then rerun Level 4.")
+  window$calculation_days <- length(expected) / 48
+  window
+}
+
+pipeline_validate_mds <- function(timestamps, min_days = getOption("ec.pipeline")$min_mds_days) {
+  t <- pipeline_time(timestamps)
+  if (length(t) < min_days * 48 || anyNA(t) ||
+      any(as.numeric(t) %% 1800 != 0) || any(diff(as.numeric(t)) != 1800))
+    stop("MDS input must contain at least ", min_days, " days on a regular half-hour grid.")
+  invisible(TRUE)
+}
+
+# Use a separate plot table so diagnostics cannot alter the calculation table.
+pipeline_figure_data <- function(data) {
+  opt <- getOption("ec.pipeline")
+  # Figures always use the saved period, excluding preceding calculation context.
+  data[data$TIMESTAMP %in% opt$window$pending, , drop = FALSE]
+}
+
+pipeline_figure_path <- function(name) {
+  folder <- getOption("ec.pipeline")$figure_dir
+  dir.create(folder, recursive = TRUE, showWarnings = FALSE)
+  file.path(folder, name)
 }
 
 pipeline_write_table <- function(data, units, file, description) {

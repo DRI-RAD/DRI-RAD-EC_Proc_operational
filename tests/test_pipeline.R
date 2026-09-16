@@ -83,6 +83,15 @@ stopifnot(nrow(hist$data) == 4, identical(hist$data$value, data$value),
 
 # Runner integration uses deterministic stand-ins for expensive science.
 # These exercise period propagation, publication, checkpoints, locks and retry.
+real_figures <- pipeline_level4_figures
+pipeline_level4_figures <- function(data, site, folder) {
+  dir.create(folder, recursive = TRUE, showWarnings = FALSE)
+  writeLines(as.character(nrow(data)), file.path(folder, paste0(site, "_Level_4_fixture.pdf")))
+}
+real_mds_window <- pipeline_mds_window
+# Tiny orchestration fixtures intentionally bypass only the scientific length
+# guard. test_mds_context.R and smoke_level4.R exercise the real guard separately.
+pipeline_mds_window <- function(window, available, min_days) window
 real_root <- .pipeline_root
 fixture <- file.path(test_root, "runner")
 dir.create(fixture)
@@ -90,8 +99,12 @@ dir.create(file.path(fixture, "R"))
 .pipeline_root <- fixture
 raw <- file.path(fixture, "raw.dat")
 pipeline_write_table(data, units, raw, "TOA5 fixture")
+raw_li <- file.path(fixture, "Site_LI710.dat")
+li <- data.frame(TIMESTAMP = clock, LE_710 = 1, H_710 = 1, diag = 0, flow = 200, tilt = 0)
+u_li <- as.data.frame(setNames(lapply(names(li), function(n) c("unit", "avg")), names(li)))
+pipeline_write_table(li, u_li, raw_li, "fixture")
 cfg <- data.frame(site = "ECSM", dir_met = raw, dir_output = file.path(fixture, "output"),
-                  dir_eddypro = ep_dir, dir_LI710 = raw, dir_LI710_old = NA_character_)
+                  dir_eddypro = ep_dir, dir_LI710 = raw_li, dir_LI710_old = NA_character_)
 readr::write_csv(cfg, file.path(fixture, "config.csv"))
 for (stage in names(pipeline_stages)) {
   script <- c('opt <- getOption("ec.pipeline")',
@@ -114,7 +127,7 @@ before <- pipeline_history(cfg$dir_output, pipeline_patterns[["L1"]])$data
 writeLines('stop("Injected stage failure")', file.path(fixture, pipeline_stages[["L1"]]))
 check_error(do.call(run_pipeline, c(args, list(stages = "L1", start = clock[1], end = clock[2], reprocess = TRUE))),
             "Injected stage failure")
-stopifnot(identical(pipeline_history(cfg$dir_output, pipeline_patterns[["L1"]])$data, before),
+stopifnot(isTRUE(all.equal(pipeline_history(cfg$dir_output, pipeline_patterns[["L1"]])$data, before)),
           !dir.exists(file.path(cfg$dir_output, ".pipeline-lock")))
 # Explicit replacement changes only the requested timestamps and resumes safely.
 script <- c('opt <- getOption("ec.pipeline")',
@@ -153,6 +166,27 @@ network_result <- run_pipeline(base_dir = fixture, config_file = file.path(fixtu
 stopifnot(length(network_result) == 30, all(file.exists(unlist(network_result))))
 stopifnot(identical(names(network_result)[1:6], paste(network, "L1", sep = ":")))
 stopifnot(all(unlist(run_pipeline(base_dir = fixture, config_file = file.path(fixture, "network.csv"))) == "skipped"))
+# A single target may load other sites only as L2 references. Invalid raw paths
+# for unselected sites must never be accessed and their outputs must not change.
+other_outputs <- unlist(lapply(network_cfg$dir_output[network_cfg$site != "ECSM"], list.files, full.names = TRUE))
+before_other <- tools::md5sum(other_outputs[!dir.exists(other_outputs)])
+network_cfg$dir_met[network_cfg$site != "ECSM"] <- "missing-reference-raw.dat"
+network_cfg$dir_eddypro[network_cfg$site != "ECSM"] <- "missing-reference-eddypro"
+readr::write_csv(network_cfg, file.path(fixture, "network.csv"))
+single <- run_pipeline(sites = "ECSM", base_dir = fixture,
+  config_file = file.path(fixture, "network.csv"), start = clock[1], end = clock[2], reprocess = TRUE)
+stopifnot(length(single) == 5, all(startsWith(names(single), "ECSM:")),
+          identical(before_other, tools::md5sum(names(before_other))))
+# No current/backup LI710 files must skip L3 LI710 without blocking L4.
+network_cfg$dir_LI710[network_cfg$site == "ECSM"] <- file.path(fixture, "no_li710", "Site_LI710.dat")
+network_cfg$dir_met[network_cfg$site == "ECSM"] <- file.path(fixture, "no_li710", "met.dat")
+readr::write_csv(network_cfg, file.path(fixture, "network.csv"))
+optional <- run_pipeline(sites = "ECSM", stages = c("L3_LI710", "L4"),
+  base_dir = fixture, config_file = file.path(fixture, "network.csv"),
+  start = clock[1], end = clock[2], reprocess = TRUE)
+stopifnot(optional[["ECSM:L3_LI710"]] == "skipped", file.exists(optional[["ECSM:L4"]]))
+pipeline_level4_figures <- real_figures
+pipeline_mds_window <- real_mds_window
 .pipeline_root <- real_root
 options(ec.pipeline = NULL)
 for (file in unname(pipeline_stages)) parse(file.path(real_root, file))

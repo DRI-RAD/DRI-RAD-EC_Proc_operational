@@ -233,7 +233,7 @@ if(TRUE){
     FC_range = c(-30,10)
   }
  
-  a <- df %>%
+  a <- pipeline_figure_data(df) %>%
     filter(LE_EasyFlux < LE_range[2] &  LE_EasyFlux >= LE_range[1] & 
              LE_EddyPro < LE_range[2] &  LE_EddyPro >= LE_range[1]) %>%
     ggplot(aes(LE_EasyFlux,LE_EddyPro)) +
@@ -247,7 +247,7 @@ if(TRUE){
          title = paste0(site_id, ": LE")
     )
   
-  b <- df %>%
+  b <- pipeline_figure_data(df) %>%
     filter(H_EasyFlux < H_range[2] &  H_EasyFlux >= H_range[1] & 
              H_EddyPro < H_range[2] &  H_EddyPro >= H_range[1]) %>%
     ggplot(aes(H_EasyFlux,H_EddyPro)) +
@@ -262,7 +262,7 @@ if(TRUE){
     )
     
   
-  c <- df %>%
+  c <- pipeline_figure_data(df) %>%
     filter(FC_EasyFlux < FC_range[2] &  FC_EasyFlux >= FC_range[1] & 
              FC_EddyPro < FC_range[2] &  FC_EddyPro >= FC_range[1]) %>%
     ggplot(aes(FC_EasyFlux,FC_EddyPro)) +
@@ -437,11 +437,11 @@ if(site_id %in% c('EDVG', 'ERVA')){
 }
 
 # despike + physical range filtering
-EC$LE_QC_despike <- despikeLF(as.data.frame(EC %>% mutate(timestamp = TIMESTAMP)),
+EC$LE_QC_despike <- pipeline_despike(as.data.frame(EC %>% mutate(timestamp = TIMESTAMP)),
 					"LE",iter = 10,light = "PotRad", z = 10, var_thr = LE_range)
-EC$H_QC_despike <- despikeLF(as.data.frame(EC %>% mutate(timestamp = TIMESTAMP)),
+EC$H_QC_despike <- pipeline_despike(as.data.frame(EC %>% mutate(timestamp = TIMESTAMP)),
 															"H",iter = 10,light = "PotRad", z = 10, var_thr = H_range)
-EC$FC_QC_despike <- despikeLF(as.data.frame(EC %>% mutate(timestamp = TIMESTAMP)),
+EC$FC_QC_despike <- pipeline_despike(as.data.frame(EC %>% mutate(timestamp = TIMESTAMP)),
 														 "FC",iter = 10,light = "PotRad", z = 10, var_thr = FC_range)
 
 # filter out if 70% fetch is outside of defined region of interest
@@ -568,7 +568,19 @@ plot_flux_qc_pdf <- function(df,
 		)
 	
 	if (nrow(df_good) == 0 || all(is.na(df_good[[var]]))) {
-		stop("No valid good-quality data found for ", var)
+		# Missing or rejected observations are a valid diagnostic outcome.
+		# Save an explicit status page instead of aborting the data publication.
+		grDevices::pdf(file_out, width = 12, height = 7, useDingbats = FALSE)
+		on.exit(grDevices::dev.off(), add = TRUE)
+		graphics::plot.new()
+		graphics::title(main = paste(site_id, var, "QAQC status"))
+		graphics::text(0.5, 0.65, "No observations passed all QC tests in this period.")
+		graphics::text(0.5, 0.5, paste("Rows:", nrow(df),
+			"| Available flux:", sum(is.finite(df[[var]])),
+			"| Missing despike flags:", sum(is.na(df[[qc_despike]]))))
+		if (nrow(df)) graphics::text(0.5, 0.35,
+			paste(format(min(df$TIMESTAMP)), "to", format(max(df$TIMESTAMP))))
+		return(invisible(file_out))
 	}
 	
 	y_rng <- range(df_good[[var]], na.rm = TRUE)
@@ -737,13 +749,13 @@ plot_flux_qc_pdf <- function(df,
 }
 
 
-plot_flux_qc_pdf(EC, var = "LE", 
+plot_flux_qc_pdf(pipeline_figure_data(EC), var = "LE",
 								 file_out = paste0(pipeline_path(base_dir, dirs_use$dir_output),"/figures/",site_id,"_Level_3_LE_flag.pdf")
 								 	)
-plot_flux_qc_pdf(EC, var = "H", 
+plot_flux_qc_pdf(pipeline_figure_data(EC), var = "H",
 								 file_out = paste0(pipeline_path(base_dir, dirs_use$dir_output),"/figures/",site_id,"_Level_3_H_flag.pdf")
 								 )
-plot_flux_qc_pdf(EC, var = "FC", 
+plot_flux_qc_pdf(pipeline_figure_data(EC), var = "FC",
 								 file_out = paste0(pipeline_path(base_dir, dirs_use$dir_output),"/figures/",site_id,"_Level_3_FC_flag.pdf")
 								 )
 

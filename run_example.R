@@ -1,7 +1,33 @@
-# Preview the default six-site run for a complete month from the project root.
+# Preview examples. Only the first example runs; uncomment one alternative.
 source("run_pipeline.R")
+data_root <- "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations"
+# Another computer can use, for example, data_root <- "D:/eddy_stations".
+
+# All six sites. Every site's L1 finishes before L2 uses cross-site references.
 run_pipeline(
-  start = "2026-08-01 00:30:00",
-  end = "2026-09-01 00:00:00",
-  dry_run = TRUE
+  base_dir = data_root,
+  start = NULL,
+  end = "2026-08-01 00:00:00",
+  min_mds_days = 100,
+  dry_run = FALSE
 )
+
+# Single target site. Only L2 reads other sites' EXISTING Level 1 results.
+# Other sites' raw logger/EddyPro files are not read and their outputs are not updated.
+# run_pipeline(
+#   sites = "ECSM",
+#   base_dir = data_root,
+#   start = "2026-08-01 00:30:00",
+#   end = "2026-09-01 00:00:00",
+#   reference_sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM"),
+#   min_mds_days = 100,
+#   figure_period = "new",  # Figures show only the pending period; MDS context is excluded.
+#   dry_run = TRUE
+# )
+
+# If the necessary historical QAQC outputs do not yet exist, prepare them first.
+# The error message reports the missing period; change these example bounds.
+# run_pipeline(sites = "ECSM", base_dir = data_root,
+#              start = "2026-05-24 00:30:00", end = "2026-09-01 00:00:00",
+#              stages = c("L1", "L2", "L3_EC", "L3_LI710"))
+# Then rerun the desired NEW period above. L4 publishes only its pending rows.

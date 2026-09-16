@@ -11,9 +11,14 @@ source(file.path(dirname(normalizePath(.run_file, mustWork = TRUE)), "run_pipeli
 # For a selected period, use inclusive interval-end timestamps, for example:
 # start = "2026-08-01 00:30:00", end = "2026-09-01 00:00:00".
 # Set dry_run = TRUE to inspect the plan without processing or writing output.
+data_root <- "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations"
+# Change data_root to this computer's data folder; the runner code need not change.
 run_pipeline(
+  base_dir = data_root,
   start = NULL,
   end = NULL,
   context_days = 0,
+  min_mds_days = 100,
+  figure_period = "new",
   dry_run = FALSE
 )

@@ -20,6 +20,12 @@ easy <- cbind(data.frame(TIMESTAMP = t), easy)
 easy$LE <- solar / 2 + sin(seq_len(n))
 easy$H <- solar / 3 + sin(seq_len(n))
 easy$FC <- -solar / 100 + sin(seq_len(n))
+# Optional regression fixtures: remove observations in both source streams.
+missing_case <- Sys.getenv("EC_SMOKE_MISSING", "none")
+missing_rows <- switch(missing_case,
+  none = integer(), all = seq_len(n), long_gap = 100:(n-100),
+  stop("Unknown EC_SMOKE_MISSING case"))
+for (variable in c("LE", "H", "FC")) easy[[variable]][missing_rows] <- NA_real_
 raw <- file.path(root, "easy.dat")
 pipeline_write_table(easy, make_units(easy), raw, "TOA5 synthetic")
 fields <- c("LE", "qc_LE", "H", "qc_H", "co2_flux", "qc_co2_flux", "Tau", "qc_Tau",
@@ -47,6 +53,14 @@ run_pipeline("ECSM", stages = "L3_EC", config_file = config, base_dir = root)
 result <- pipeline_history(out, pipeline_patterns[["L3_EC"]])$data
 stopifnot(nrow(result) == n, all(result$processing == "EddyPro"),
           all(c("LE_QC_despike", "FC_QC_longrun") %in% names(result)))
+if (length(missing_rows)) {
+  for (variable in c("LE", "H", "FC")) {
+    stopifnot(all(is.na(result[[variable]][missing_rows])),
+              all(is.na(result[[paste0(variable, "_QC_despike")]][missing_rows])))
+  }
+}
+figures <- list.files(file.path(out, "figures"), pattern = "Level_3_.*flag.*pdf$", full.names = TRUE, recursive = TRUE)
+stopifnot(length(figures) == 3, all(file.info(figures)$size > 1000))
 stopifnot(run_pipeline("ECSM", stages = "L3_EC", config_file = config, base_dir = root)[[1]] == "skipped")
 unlink(root, recursive = TRUE)
 cat("PASS: actual Level 3 CSV ingestion, QAQC, output publication, and no-new-data rerun.\n")

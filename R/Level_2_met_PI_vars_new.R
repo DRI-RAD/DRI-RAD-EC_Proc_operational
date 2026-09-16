@@ -904,11 +904,10 @@ for(i in all_sites) {
 	# plot
 	#--------------------------------------------------
 	plot_gapfilled_pdf(
-		df = df_PI,
+		df = pipeline_figure_data(df_PI),
 		site_id = i,
 		file_out = paste0(
-			base_dir,
-			dirs_use$dir_output,
+			pipeline_path(base_dir, dirs_use$dir_output),
 			"/figures/",
 			i,
 			"_Level_2_Figure_gapfilled_PI.pdf"
@@ -1301,8 +1300,33 @@ get_peak_hour <- function(x, hour, frac = 0.9, hour_min = 10, hour_max = 20) {
 }
 
 
+# Fill damping-depth edges explicitly when only one finite estimate exists.
+# No estimate means no reconstruction; do not invent a depth or a zero lag.
+level2_fill_damping <- function(x) {
+  x[!is.finite(x)] <- NA_real_
+  valid <- which(!is.na(x))
+  if (!length(valid)) return(rep(NA_real_, length(x)))
+  if (length(valid) == 1L) return(rep(x[valid], length(x)))
+  zoo::na.approx(x, na.rm = FALSE, rule = 2)
+}
+
+level2_smooth_damping <- function(x) {
+  x <- level2_fill_damping(x)
+  # Incremental windows shorter than 30 days cannot support the original
+  # 30-day mean. Keep their interpolated daily estimates without smoothing.
+  if (length(x) < 30L || all(is.na(x))) return(x)
+  level2_fill_damping(zoo::rollmean(x, k = 30, fill = NA, align = "center"))
+}
+
+level2_lead_or_na <- function(x, n) {
+  # A missing daily peak/depth leaves the optional Leuning estimate unavailable.
+  if (length(n) != 1L || !is.finite(n) || n < 0 || n != floor(n) || n >= length(x))
+    return(rep(NA_real_, length(x)))
+  dplyr::lead(x, n = as.integer(n))
+}
+
 #--------------------------------------------------
-# Harmonic based soil heat flux 
+# Harmonic based soil heat flux
 #--------------------------------------------------
 
 for(i in all_sites) {
@@ -1348,18 +1372,10 @@ for(i in all_sites) {
 			# -----------------------------------
 			# gap fill by linear interpolation
 			# -----------------------------------
-			zd_sun   = zoo::na.approx(zd_sun, na.rm = FALSE, rule = 2),
-			zd_shade = zoo::na.approx(zd_shade, na.rm = FALSE, rule = 2),
-			
-			# -----------------------------------
-			# smooth with centered rolling mean
-			# -----------------------------------
-			zd_sun   = zoo::rollmean(zd_sun, k = 30, fill = NA, align = "center"),
-			zd_shade = zoo::rollmean(zd_shade, k = 30, fill = NA, align = "center"),
-			
-			# fill edge NA created by rollmean
-			zd_sun   = zoo::na.approx(zd_sun, na.rm = FALSE, rule = 2),
-			zd_shade = zoo::na.approx(zd_shade, na.rm = FALSE, rule = 2),
+			# Preserve the 30-day smoothing where supported; handle short
+			# incremental windows and missing daily peaks without losing all rows.
+			zd_sun   = level2_smooth_damping(zd_sun),
+			zd_shade = level2_smooth_damping(zd_shade),
 			
 			# recalculate dT
 			dt_sun   = 24 / (2 * pi) * meta1$Sun_plate_depth_1   / zd_sun,
@@ -1377,8 +1393,8 @@ for(i in all_sites) {
 		group_by(DATE) %>%
 		mutate(
 			# Method 1: first order (Leuning model)
-			G_sun_leuning = lead(G_plate_sun,first(dn_sun)) * exp(meta1$Sun_plate_depth_1 / zd_sun),
-			G_shade_leuning = lead(G_plate_shade,first(dn_shade)) * exp(meta1$Shade_plate_depth_1 / zd_shade),
+			G_sun_leuning = level2_lead_or_na(G_plate_sun,first(dn_sun)) * exp(meta1$Sun_plate_depth_1 / zd_sun),
+			G_shade_leuning = level2_lead_or_na(G_plate_shade,first(dn_shade)) * exp(meta1$Shade_plate_depth_1 / zd_shade),
 			
 			# # Method 2: harmonic decomposition
 			# G_sun_Kim = predict_harmonic_surface(G_plate_sun, HOUR, zd = zd_sun, depth = meta1$Sun_plate_depth_1),
@@ -1408,7 +1424,7 @@ for(i in all_sites) {
 	site_list[[i]] <- df
 	
 	# To do: soil heat flux figure save
-	a <- df %>%
+	a <- pipeline_figure_data(df) %>%
 		mutate(HOUR = hour(TIMESTAMP) + minute(TIMESTAMP)/60) %>%
 		group_by(HOUR) %>%
 		summarise(G_calorimetric = mean(G_calorimetric,na.rm=T),
@@ -1425,7 +1441,7 @@ for(i in all_sites) {
 		labs(y = expression(G~(W~m^-2))) +
 		geom_vline(xintercept = 12, lty = 2, alpha = 0.2) +
 		ggtitle(i)
-	print(a)
+	# The soil comparison object is not exported; named diagnostic PDFs above are retained.
 	
 }
 
@@ -1477,8 +1493,6 @@ for(i in all_sites) {
 	)
 	
 }
-
-
 
 
 

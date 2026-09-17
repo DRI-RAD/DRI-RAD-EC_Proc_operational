@@ -409,6 +409,8 @@ df <- df %>%
 ################################################################################
 #### energy balance approach: VBR and residual energy
 ################################################################################
+# VBR without the _Ts suffix is TEST ONLY; not used for the study analysis.
+# VBR_Ts was used for analysis. Keep each MDS estimate and its QC mask separate.
 # Variance Bowen ratio 
 # T_SONIC_SIGMA  : sonic temperature sd [K]
 # H2O_SIGMA : water vapor sd [mmolH2O mol-1]
@@ -462,7 +464,7 @@ MDSout <- data.frame(TIMESTAMP = EddyData$TIMESTAMP,
 										 EProc$sExportResults() %>% 
 										   mutate(LE_RE_fall = ifelse(LE_RE_fall_qc == 1, LE_RE_fall, NA),
 										          LE_VBR_fall = ifelse(LE_VBR_fall_qc == 1, LE_VBR_fall, NA),
-										          LE_VBR_fall = ifelse(LE_VBR_Ts_fall_qc == 1, LE_VBR_Ts_fall, NA),
+										          LE_VBR_Ts_fall = ifelse(LE_VBR_Ts_fall_qc == 1, LE_VBR_Ts_fall, NA),
 										          ) %>%
 										 	select(LE_RE_f,LE_RE_fall, LE_VBR_f, LE_VBR_fall, LE_VBR_Ts_f, LE_VBR_Ts_fall) %>%
 										 	rename(LE_RE_F = LE_RE_f,LE_RE_MDS = LE_RE_fall, 

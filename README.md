@@ -293,12 +293,25 @@ stopping processing. The final calorimetric `G_PI` calculation is unchanged.
 - Package installation failure: restart RStudio, verify internet/CRAN/GitHub
   access, and install matching Rtools if R requests build tools.
 
+## VBR and VBR_Ts MDS comparison outputs
+
+`LE_VBR_MDS` and `LE_VBR_Ts_MDS` retain their respective MDS estimates only
+where that estimate's `*_fall_qc` equals 1. VBR without the `_Ts` suffix is
+retained for testing only and was not used for the study analysis; VBR_Ts was used.
+
+The earlier export block overwrote the VBR estimate with the Ts estimate and
+left the Ts comparison column unmasked. This is now corrected. The separate
+filled series `LE_VBR_Ts_F` and `ET_VBR_Ts_F` are unchanged by this export fix.
+Existing CSVs are not rewritten automatically: use explicit period bounds and
+`reprocess = TRUE` for Level 4 to regenerate already processed rows.
+
 ## Tests
 
 Tests use temporary synthetic data and do not write to the network data root.
 From the project directory:
 
 ```r
+system2(file.path(R.home("bin"), "Rscript"), "tests/test_vbr_mds.R")
 system2(file.path(R.home("bin"), "Rscript"), "tests/test_layout.R")
 system2(file.path(R.home("bin"), "Rscript"), "tests/test_pipeline.R")
 system2(file.path(R.home("bin"), "Rscript"), "tests/test_publication.R")

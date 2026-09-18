@@ -101,6 +101,7 @@ if(site_id =="EDVG") {
 }
 
 # left join to HH data
+missing_li710 <- !(met$TIMESTAMP %in% LI710$TIMESTAMP)
 LI710 <- left_join(met,LI710)
 LI710_unit <- left_join(met_unit,LI710_unit)
 
@@ -179,6 +180,10 @@ LI710$data_qc_710[is.na(LI710$data_qc_710)] <- 0
 
 LI710$LE_710_QC_diag <- ifelse(has_bad_diag(LI710$diag_710) & LI710$data_qc_710 > 15, 1, 0)
 LI710$H_710_QC_diag <- ifelse(has_bad_diag(LI710$diag_710) & LI710$data_qc_710 > 15, 1, 0)
+
+# No source sample is not a good-quality observation. Preserve padded intervals
+# as NA in measurements and flags, rather than the default zero QC assignments.
+LI710[missing_li710, setdiff(names(LI710), c("TIMESTAMP", "PotRad"))] <- NA
 
 
 

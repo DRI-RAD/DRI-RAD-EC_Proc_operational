@@ -1,5 +1,20 @@
 # Operational layout validation
 
+## EddyPro automatic-end alignment (2026-09-18)
+
+- All ten `tests/test_*.R` scripts passed with R 4.4.2 on local synthetic data.
+- New `test_end_alignment.R` checks site-specific EddyPro observation endpoints,
+  longer/shorter logger and LI-710 streams, NA padding, common figure directories,
+  unequal stage checkpoints, subset-stage runs, skipped reruns, explicit-end
+  behavior, and failure when automatic-end EddyPro input is absent.
+- The same test executes the actual LI-710 QAQC adapter with a short source and
+  with no source observations. Both publish the complete requested time grid;
+  absent samples retain NA measurements and QC flags.
+- Multi-stage alignment uses deterministic stand-in calculations; this revision
+  does not claim a full scientific L1-L4 run on operational network observations.
+  Existing QAQC thresholds, MDS calculations and archive retention are unchanged.
+  Historical cumulative rows beyond a newly selected end are preserved.
+
 ## September 15: context and diagnostic updates
 
 - test_mds_context.R checks exact 100-day padding for a 10-day pending interval,

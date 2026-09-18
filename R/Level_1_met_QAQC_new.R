@@ -49,7 +49,14 @@ CSFormat <- pipeline_slice(CSFormat)
 # Full time sequence
 CSFormat <- CSFormat %>%
 	distinct(TIMESTAMP, .keep_all = TRUE)
-TIMESTAMP <- seq(from = min(CSFormat$TIMESTAMP), to = max(CSFormat$TIMESTAMP), 60*30)
+if (isTRUE(pipeline_options$automatic_end)) {
+  # Retain pending intervals even if the logger ends before EddyPro. The join
+  # below leaves unavailable logger observations as NA for the existing QAQC.
+  grid_start <- min(c(CSFormat$TIMESTAMP, pipeline_options$window$start))
+  TIMESTAMP <- seq(grid_start, pipeline_options$window$end, by = 1800)
+} else {
+  TIMESTAMP <- seq(from = min(CSFormat$TIMESTAMP), to = max(CSFormat$TIMESTAMP), 60*30)
+}
 CSFormat <- left_join(data.frame(TIMESTAMP), CSFormat)
 
 # remove Easyflux output etc.

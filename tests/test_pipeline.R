@@ -121,7 +121,7 @@ first <- do.call(run_pipeline, args)
 stopifnot(length(first) == 5, all(file.exists(unlist(first))))
 second <- do.call(run_pipeline, args)
 stopifnot(all(unlist(second) == "skipped"))
-stopifnot(nrow(pipeline_history(cfg$dir_output, pipeline_patterns[["L1"]])$data) == 4,
+stopifnot(nrow(pipeline_history(cfg$dir_output, pipeline_patterns[["L1"]])$data) == 2,
           nrow(pipeline_history(cfg$dir_output, pipeline_patterns[["L4"]])$data) == 2)
 before <- pipeline_history(cfg$dir_output, pipeline_patterns[["L1"]])$data
 writeLines('stop("Injected stage failure")', file.path(fixture, pipeline_stages[["L1"]]))
@@ -137,7 +137,7 @@ script <- c('opt <- getOption("ec.pipeline")',
 writeLines(script, file.path(fixture, pipeline_stages[["L1"]]))
 do.call(run_pipeline, c(args, list(stages = "L1", start = clock[1], end = clock[2], reprocess = TRUE)))
 after <- pipeline_history(cfg$dir_output, pipeline_patterns[["L1"]])$data
-stopifnot(identical(after$value, c(99, 99, 5, 5)))
+stopifnot(identical(after$value, c(99, 99)))
 dir.create(file.path(cfg$dir_output, ".pipeline-lock"))
 check_error(do.call(run_pipeline, c(args, list(stages = "L1"))), "Site is locked")
 unlink(file.path(cfg$dir_output, ".pipeline-lock"), recursive = TRUE)

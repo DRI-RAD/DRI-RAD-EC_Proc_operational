@@ -49,6 +49,7 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
   base_dir <- normalizePath(base_dir, winslash = "/", mustWork = TRUE)
   config_file <- normalizePath(config_file, winslash = "/", mustWork = TRUE)
   if (reprocess && (is.null(start) || is.null(end))) stop("Reprocessing requires explicit start and end.")
+  automatic_end <- is.null(end)
   if (!is.null(start)) start <- pipeline_time(start)
   if (!is.null(end)) end <- pipeline_time(end)
   if ((!is.null(start) && length(start) != 1L) || (!is.null(end) && length(end) != 1L))
@@ -86,16 +87,36 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
   }
   # Load raw clocks once. Reading historical source rows is necessary to discover
   # coverage, but scientific processing is restricted to the selected window.
-  logger <- eddy <- li710 <- list()
+  logger <- eddy <- li710 <- site_end <- figure_bounds <- list()
   for (site in sites) {
     row <- dirs[dirs$site == site, ]
     if ("L1" %in% stages) logger[[site]] <- pipeline_raw_times(pipeline_path(base_dir, row$dir_met))
-    if ("L3_EC" %in% stages) eddy[[site]] <- pipeline_eddypro(pipeline_path(base_dir, row$dir_eddypro))
+    # Even an L1/L2/L4-only automatic run needs EddyPro to determine its cap.
+    if (automatic_end || "L3_EC" %in% stages)
+      eddy[[site]] <- pipeline_eddypro(pipeline_path(base_dir, row$dir_eddypro))
+    site_end[[site]] <- if (automatic_end) pipeline_eddypro_end(eddy[[site]], site) else end
+    if (automatic_end) message(site, ": common end from EddyPro = ", site_end[[site]])
     if ("L3_LI710" %in% stages) {
       files <- pipeline_li710_files(row, base_dir)
       li710[[site]] <- pipeline_li710_read(files)
       message(site, ": discovered ", length(files), " LI710 source files.")
     }
+  }
+  if (automatic_end) for (site in sites) {
+    # One run-level figure folder per site, even when stage checkpoints differ.
+    # Individual figure data and period diagnostics still use stage pending rows.
+    base_times <- if ("L1" %in% stages) logger[[site]] else times_for(site, "L1")
+    grid <- pipeline_grid_to_end(base_times, site_end[[site]])
+    if (site == "EDVG") grid <- grid[grid >= pipeline_time("2023-09-26 11:30:00")]
+    pending <- lapply(stages, function(s) {
+      times <- if (s %in% c("L3_EC", "L4"))
+        grid[grid >= min(eddy[[site]]$data$TIMESTAMP)] else grid
+      w <- pipeline_plan(times, history_for(site, s), start, site_end[[site]], context_days, reprocess)
+      if (is.null(w)) numeric() else as.numeric(w$pending)
+    })
+    pending <- unlist(pending, use.names = FALSE)
+    if (length(pending)) figure_bounds[[site]] <- c(
+      as.POSIXct(min(pending), origin = "1970-01-01", tz = "UTC"), site_end[[site]])
   }
   results <- list()
   # Stage-major order makes every selected site's new L1 available to L2.
@@ -110,7 +131,7 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
     }
     tryCatch({
       available <- switch(stage,
-        L1 = seq(min(logger[[site]]), max(logger[[site]]), by = 1800),
+        L1 = pipeline_grid_to_end(logger[[site]], if (automatic_end) site_end[[site]] else max(logger[[site]])),
         L2 = times_for(site, "L1"),
         L3_EC = intersect(as.numeric(times_for(site, "L1")), as.numeric(times_for(site, "L2"))),
         L3_LI710 = times_for(site, "L1"),
@@ -126,10 +147,15 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
       # remain in the regular grid for the original fallback/gap-filling logic.
       if (stage %in% c("L3_EC", "L3_LI710")) {
         raw_times <- if (stage == "L3_EC") eddy[[site]]$data$TIMESTAMP else lubridate::floor_date(li710[[site]]$data$TIMESTAMP, "30 minutes")
-        available <- if (length(raw_times)) available[available >= min(raw_times) & available <= max(raw_times)] else available[FALSE]
+        # Automatic LI710 output follows the logger grid through EddyPro's end,
+        # including missing leading/trailing samples. Explicit-end runs retain
+        # their existing source-coverage behavior.
+        if (stage == "L3_EC" || !automatic_end)
+          available <- if (length(raw_times)) available[available >= min(raw_times) & available <= max(raw_times)] else available[FALSE]
       }
-      window <- pipeline_plan(available, history_for(site, stage), start, end, context_days, reprocess)
+      window <- pipeline_plan(available, history_for(site, stage), start, site_end[[site]], context_days, reprocess)
       if (stage == "L4") window <- pipeline_mds_window(window, available, min_mds_days)
+      if (!is.null(window) && automatic_end) window$figure_bounds <- figure_bounds[[site]]
       key <- paste(site, stage, sep = ":")
       if (is.null(window)) {
         if (stage == "L3_LI710" && !length(raw_times))
@@ -172,6 +198,7 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
             options(ec.pipeline = list(dirs = stage_dirs, base_dir = base_dir,
                 sites = site, reference_sites = refs, window = window, eddypro = eddy[[site]],
                 li710 = li710[[site]], min_mds_days = min_mds_days, figure_period = figure_period,
+                automatic_end = automatic_end,
                 figure_dir = file.path(staging_root, site, "figures")))
             env <- new.env(parent = environment(run_pipeline))
             sys.source(file.path(.pipeline_root, pipeline_stages[[stage]]), envir = env)

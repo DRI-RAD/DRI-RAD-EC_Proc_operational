@@ -1,7 +1,8 @@
 # Publication is stage-specific: one current cumulative table. L4 retains all
 # previous tables; L1-L3 retain one. Figures use period and cumulative locations.
 pipeline_period_label <- function(window) {
-  paste(format(range(window$pending), "%Y%m%dT%H%M", tz = "UTC"), collapse = "_to_")
+  bounds <- if (!is.null(window$figure_bounds)) window$figure_bounds else range(window$pending)
+  paste(format(bounds, "%Y%m%dT%H%M", tz = "UTC"), collapse = "_to_")
 }
 
 # Summaries always describe pending timestamps, never the MDS training context.

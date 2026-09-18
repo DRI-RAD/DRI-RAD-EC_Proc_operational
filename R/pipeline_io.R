@@ -197,6 +197,21 @@ pipeline_eddypro <- function(site_dir, window = NULL) {
   result
 }
 
+# The latest observation, not the filename/run date or latest nonmissing flux,
+# defines the automatic cap. Never silently fall back to a longer logger clock.
+pipeline_eddypro_end <- function(input, site = "site") {
+  times <- input$data$TIMESTAMP
+  if (is.null(times) || !length(times) || anyNA(times))
+    stop("No valid EddyPro observation timestamps for ", site, "; specify end explicitly or supply EddyPro output.")
+  max(pipeline_time(times))
+}
+
+pipeline_grid_to_end <- function(times, end) {
+  times <- pipeline_time(times)
+  if (!length(times) || min(times) > end) return(times[FALSE])
+  seq(min(times), end, by = 1800)
+}
+
 pipeline_plan <- function(available, history, start = NULL, end = NULL,
                           context_days = 0, reprocess = FALSE) {
   available <- sort(unique(pipeline_time(available)))

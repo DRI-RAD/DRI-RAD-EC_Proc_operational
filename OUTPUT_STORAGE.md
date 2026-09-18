@@ -29,10 +29,13 @@ Columbus_Salt_Marsh/
   move to archive; no L4 archive version expires. Same-day filename collisions
   receive a time/unique suffix. Multiple legacy L4 root versions are preserved
   individually. Levels 1-3 retain their previous-version-only policy.
-- Period directories use the inclusive first/last pending timestamps. Stages with
-  identical bounds share a folder. Interior holes are possible; these are bounds,
-  not a promise that every interval was updated. Reprocessing the same period
-  overwrites only matching figure names in that period directory.
+- With `end = NULL`, period directories use one common envelope per site/run:
+  the earliest pending timestamp across selected stages through that site's last
+  EddyPro observation. Stages share this folder even if their checkpoints differ.
+  With an explicit `end`, directories retain each stage's first/last pending
+  timestamps. Interior holes are possible; folder bounds do not imply that every
+  interval was updated. Each figure still uses only its stage's pending rows.
+  Reprocessing the same period overwrites only matching figure names there.
 - All five cumulative L4 figures use the entire merged output, including prior
   rows outside the update. Their `_full_period` suffix is reserved for automatic
   replacement; it avoids overwriting existing period figures in the root.
@@ -52,6 +55,12 @@ termination can leave a hidden `.publish-*` recovery directory, which blocks
 another publication. Preserve its `recovery.rds` and `installed.rds` files until
 an operator has restored the backup or confirmed publication completed. The site
 lock must also be cleared only after recovery and after confirming no run is active.
+
+Automatic-end processing caps new rows at the site's EddyPro end and retains NA
+observations/QC for absent LI-710 logger intervals. Existing cumulative rows beyond
+that end are not deleted; cumulative Level 4 figures continue to show the full
+saved history. The period audit's pending coverage describes actual stage rows,
+whereas its figure period label describes the shared run envelope.
 
 ## Period audit and quality statistics
 

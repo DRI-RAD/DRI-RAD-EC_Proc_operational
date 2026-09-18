@@ -155,9 +155,28 @@ run_pipeline(
 )
 ```
 
-Remove `dry_run = TRUE` after checking the preview. If bounds are omitted, every
-stage discovers new timestamps from its sources and existing outputs. Processed
-rows are skipped.
+Remove `dry_run = TRUE` after checking the preview. Processed rows are skipped.
+With `end = NULL` (the default), the latest EddyPro observation timestamp defines
+the common processing end **for each site**, including runs selecting only some
+stages. This uses the observation clock, not the export filename date or the last
+nonmissing flux. EddyPro input is therefore required for automatic-end runs.
+Sites may have different ends from one another.
+
+Logger and LI-710 time grids extend to that end. Missing logger measurements and
+LI-710 observations remain NA; absent LI-710 samples also have NA QC flags. An
+interval absent from the LI-710 logger is treated as an absent observation. Level
+4 retains its existing gap-filling rules, so filled estimates can still be
+available where observations are missing. An explicit `end` retains the previous
+source-coverage behavior instead of applying this automatic EddyPro limit.
+
+All stages updated in an automatic-end run share one site-specific figure folder
+covering the earliest pending timestamp across selected stages through the
+EddyPro end. Individual figures still plot only that stage's pending data.
+
+Existing cumulative output rows are preserved, even if an older output extends
+beyond the current EddyPro end; this change does not truncate historical files.
+If source values are later corrected at timestamps already saved (including NA
+rows), update those rows with an explicitly bounded `reprocess = TRUE` run.
 
 ## Run one site
 

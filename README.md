@@ -1,6 +1,6 @@
 # DRI-RAD Eddy Covariance Processing Pipeline
 
-This repository processes logger and EddyPro data for NICE NET eddy
+This repository processes logger and EddyPro data for NICE NET (DRI) eddy
 covariance sites: ECDP, EDVG, EDVP, ERVA, ERVP, and ECSM. It runs meteorological
 QAQC, multi-site meteorological gap filling, EC and LI-710 QAQC, REddyProc MDS
 gap filling, ET calculations, and diagnostic figures.

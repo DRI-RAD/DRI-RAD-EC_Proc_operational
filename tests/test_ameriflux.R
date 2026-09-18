@@ -4,7 +4,7 @@ fail <- function(expr) stopifnot(inherits(tryCatch(force(expr), error = identity
 t <- pipeline_time(c("2024-02-28 23:30:00", "2024-02-29 00:00:00", "2024-02-29 01:00:00"))
 d <- data.frame(TIMESTAMP = t, processing = c("EddyPro", "EasyFlux", "EddyPro"),
   LE = c(100,200,300), H = c(10,20,30), FC = c(-1,-2,-3),
-  PA = c(90000,91000,92000), PA_PI_F = c(90000,91000,92000),
+  PA = c(90000,91000,92000), PA_PI_F = c(90,91,92),
   TA_1_1_3 = c(280,281,282), RH_1_1_3 = c(0.2,0.3,0.4),
   SWC_1_1_1 = c(0.1,0.2,0.3), T_SONIC = c(300,25,301), T_SONIC_SIGMA = c(2,3,4),
   G_plate = 10, SG = 3, G_PI = 13, G_PI_F = 14, NETRAD = 100, NETRAD_PI_F = 101,
@@ -23,7 +23,7 @@ for (v in c("LE", "H", "FC")) {
 units <- setNames(rep("#", ncol(d)), names(d))
 units[c("LE","H","SLE","SH","G_plate","SG","G_PI","G_PI_F","NETRAD","NETRAD_PI_F","LE_PI_F","H_PI_F")] <- "[W+1m-2]"
 units[c("FC","SC","FC_PI_F")] <- "[\u00b5mol+1s-1m-2]"
-units[c("PA")] <- "Pa"; units['PA_PI_F'] <- '%'
+units[c("PA")] <- "Pa"; units['PA_PI_F'] <- 'kPa'
 units[c("TA_1_1_3","T_SONIC_SIGMA")] <- "K"
 units['T_SONIC'] <- "deg C"; units['RH_1_1_3'] <- 'fraction'
 units['SWC_1_1_1'] <- 'm3/m3'; units['ALB'] <- 'fraction' # legacy header, L1 computes percent

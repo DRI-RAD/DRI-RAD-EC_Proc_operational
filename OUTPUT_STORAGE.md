@@ -47,7 +47,9 @@ Columbus_Salt_Marsh/
   Existing figures, figure archives, and legacy run folders are not moved,
   deleted or migrated. They can be organized manually.
 - Skipped stages do not rotate CSVs or regenerate figures. Corrected/late source
-  observations at processed timestamps require explicitly bounded reprocessing.
+  observations at processed timestamps require `reprocess = TRUE`. Bounds are
+  optional: omitted start uses the earliest available interval and omitted end
+  uses the site's latest EddyPro observation. Rows outside that range are retained.
 
 The new CSV is prepared before publication. Figure generation/copy failures
 roll back current/archived CSV changes and overwritten figures. Forced process

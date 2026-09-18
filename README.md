@@ -186,7 +186,7 @@ EddyPro end. Individual figures still plot only that stage's pending data.
 Existing cumulative output rows are preserved, even if an older output extends
 beyond the current EddyPro end; this change does not truncate historical files.
 If source values are later corrected at timestamps already saved (including NA
-rows), update those rows with an explicitly bounded `reprocess = TRUE` run.
+rows), update those rows with `reprocess = TRUE`; optionally bound the affected period.
 
 ## Run one site
 
@@ -250,8 +250,8 @@ source coverage, L3 LI710 is skipped. Level 4 requires L1, L2 and L3 EC only:
 available L3 LI710 is left-joined, and absent LI710 channels remain NA. LI710 MDS
 is skipped for channels with no usable observations; EC processing continues.
 
-If backup data arrive for timestamps already saved as missing, use explicit
-start/end bounds and `reprocess = TRUE` for L3 LI710 and L4 to update those rows.
+If backup data arrive for timestamps already saved as missing, use
+`reprocess = TRUE` for L3 LI710 and L4, optionally restricting start/end, to update those rows.
 Adding a source file alone does not overwrite an existing processed timestamp.
 
 ## Diagnostic figures
@@ -289,7 +289,25 @@ prevents simultaneous writes for one site. After a forcibly terminated session,
 remove a stale lock only after confirming that no other run is active.
 
 Existing timestamps count as processed, even if scientific values are `NA`.
-Corrected source data require explicit bounds and `reprocess = TRUE`:
+Corrected source data require `reprocess = TRUE`. Bounds are optional:
+
+- `start = NULL`: begin at each selected stage's earliest available interval.
+- `end = NULL`: stop at each site's latest EddyPro observation, as in a normal run.
+- Both omitted: reprocess all available intervals through that EddyPro end.
+
+Existing rows in the selected interval are replaced; saved history outside that
+interval is retained. Stage input/deployment limits and the Level 4 minimum MDS
+context requirement still apply. Use `dry_run = TRUE` to inspect the resolved range.
+
+```r
+# Reprocess from the beginning through each site's EddyPro end.
+run_pipeline(base_dir = data_root, reprocess = TRUE)
+
+# Reprocess from a specified start through each site's EddyPro end.
+run_pipeline(base_dir = data_root, start = "2026-08-01 00:30:00", reprocess = TRUE)
+```
+
+Explicit bounds can restrict the correction to a particular period:
 
 ```r
 run_pipeline(

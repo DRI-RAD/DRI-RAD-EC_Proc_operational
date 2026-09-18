@@ -164,11 +164,6 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
     if (grepl("_SSITC_TEST$", m$source)) from <- "1" # L3 explicitly normalizes the 0/1/2 test scale.
     # Verified code provenance: ALB is recomputed as SW_OUT/SW_IN*100 in L1.
     if (m$source == "ALB" && !m$source %in% names(unit_overrides)) from <- "%"
-    # L2 copies PA to PA_PI_F before filling, but writes an incorrect '%' header.
-    if (m$source == "PA_PI_F" && identical(from, "%") && !m$source %in% names(unit_overrides)) {
-      from <- input_unit("PA")
-      m$note <- paste(m$note, "Legacy percent header ignored; unit inherited from PA by L2 calculation provenance")
-    }
     if (!m$source %in% names(x)) {
       record(m$source, m$target, from, m$unit, "omitted", "Source column absent")
       next

@@ -66,6 +66,31 @@ for(site in cfg$site) {
 li<-pipeline_history(cfg$dir_output[1],pipeline_patterns[['L3_LI710']])$data
 stopifnot(nrow(li)==4,all(is.na(li$LE_710[3:4])))
 stopifnot(all(unlist(do.call(run_pipeline,args))=='skipped'))
+# Reprocessing can omit either or both bounds, even with complete saved history.
+for (bounds in list(list(), list(start=t[2]), list(end=t[3]), list(start=t[2],end=t[3]))) {
+ p<-do.call(run_pipeline,c(args,bounds,list(reprocess=TRUE,dry_run=TRUE)))
+ for(site in cfg$site) {
+   expected_end<-if(!is.null(bounds$end))bounds$end else if(site=='ECSM')t[4] else t[6]
+   for(stage in names(pipeline_stages)) {
+     w<-p[[paste(site,stage,sep=':')]]
+     # Explicit-end LI710 retains its existing raw-source coverage restriction.
+     last<-if(!is.null(bounds$end) && site=='ECSM' && stage=='L3_LI710')min(expected_end,t[2]) else expected_end
+     first<-if(is.null(bounds$start))t[1] else bounds$start
+     stopifnot(w$start==first,w$end==last,
+               identical(as.numeric(w$pending),as.numeric(seq(first,last,by=1800))))
+   }
+ }
+}
+# Actual publication replaces saved rows without explicit bounds and retains
+# older rows outside the inferred EddyPro cap rather than deleting history.
+old<-pipeline_history(cfg$dir_output[1],pipeline_patterns[['L1']])
+old$data$PotRad<-999
+old$data<-rbind(old$data,data.frame(TIMESTAMP=t[7],PotRad=777))
+pipeline_write_table(old$data,old$units,
+  file.path(cfg$dir_output[1],paste0('ECSM_',pipeline_patterns[['L1']],'_seed.csv')),'old')
+run_pipeline('ECSM',stages='L1',reference_sites='ECSM',base_dir=root,config_file=config,reprocess=TRUE)
+updated<-pipeline_history(cfg$dir_output[1],pipeline_patterns[['L1']])$data
+stopifnot(all(updated$PotRad[updated$TIMESTAMP<=t[4]]==100),updated$PotRad[updated$TIMESTAMP==t[7]]==777)
 # Different historical checkpoints still share one run-level figure period.
 uneven<-cfg[1,,drop=FALSE];uneven$dir_output<-file.path(root,'uneven')
 dir.create(uneven$dir_output);readr::write_csv(uneven,file.path(root,'uneven.csv'))

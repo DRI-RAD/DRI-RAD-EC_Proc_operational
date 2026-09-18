@@ -110,9 +110,7 @@ Two source-code-specific cases require more than trusting a header:
   an EasyFlux header. `processing` determines which rows need the K-to-deg-C
   conversion; EasyFlux rows use the source unit. Unknown provenance with finite
   observations causes that optional variable to be omitted.
-- L2 currently labels PA_PI_F as percent even though it copies/fills PA. The
-  exporter inherits PA's unit for this legacy header and records the correction.
-  It does not edit L2 or old files. L1 also explicitly recomputes ALB as percent,
+- L1 explicitly recomputes ALB as percent,
   so that calculated unit takes precedence over a legacy logger header.
 
 For a reviewed metadata error, override the SOURCE unit (not the desired unit):

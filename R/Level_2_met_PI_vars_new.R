@@ -1454,10 +1454,10 @@ for(i in all_sites) {
 
 write_custom_csv <- pipeline_write
 
-# To do: unit update
+# PA_PI_F retains the logger PA scale (kPa); filling does not change its unit.
 df_unit <- data.frame(TIMESTAMP = c("TS",NA), TA_PI_F = c('deg C',"derived"), 
 											TA_PI_F_method = c("#","derived"), RH_PI_F = c('%',"derived"), 
-											RH_PI_F_method = c("#","derived"), PA_PI_F = c('%',"derived"), 
+											RH_PI_F_method = c("#","derived"), PA_PI_F = c('kPa',"derived"), 
 											PA_PI_F_method = c("#","derived"), P_PI_F = c('mm',"derived"), 
 											P_PI_F_method = c("#","derived"), VPD_PI_F = c("hPa","derived"),
 											SW_IN_PI_F = c("W m-2","derived"), SW_IN_PI_F_method = c("#","derived"), 
@@ -1493,6 +1493,5 @@ for(i in all_sites) {
 	)
 	
 }
-
 
 

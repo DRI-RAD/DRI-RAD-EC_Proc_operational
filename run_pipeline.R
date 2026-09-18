@@ -48,7 +48,9 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
     stop("base_dir is not an accessible data root: ", base_dir)
   base_dir <- normalizePath(base_dir, winslash = "/", mustWork = TRUE)
   config_file <- normalizePath(config_file, winslash = "/", mustWork = TRUE)
-  if (reprocess && (is.null(start) || is.null(end))) stop("Reprocessing requires explicit start and end.")
+  # Reprocessing uses the same optional bounds as an incremental run: NULL start
+  # keeps each stage's earliest available interval; NULL end uses the site's
+  # latest EddyPro observation. Existing rows within that window are replaced.
   automatic_end <- is.null(end)
   if (!is.null(start)) start <- pipeline_time(start)
   if (!is.null(end)) end <- pipeline_time(end)

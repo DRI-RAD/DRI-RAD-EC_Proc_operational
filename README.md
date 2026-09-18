@@ -5,6 +5,14 @@ covariance sites: ECDP, EDVG, EDVP, ERVA, ERVP, and ECSM. It runs meteorological
 QAQC, multi-site meteorological gap filling, EC and LI-710 QAQC, REddyProc MDS
 gap filling, ET calculations, and diagnostic figures.
 
+To prepare an AmeriFlux review file from existing Level 4 results, use
+`source("run_level5_ameriflux.R")` followed by
+`run_level5_ameriflux(base_dir = data_root)`. All six sites are selected by
+default. This separate export step preserves the input files. See
+[Level 5 instructions and variable mapping](AMERIFLUX_LEVEL5.md), including
+the requested flux QC policy and the distinction between local `_PI` review
+columns and final AmeriFlux submission labels.
+
 ## Software and package installation
 
 Use R 4.4 or later and a recent RStudio Desktop. The pipeline requires:
@@ -143,7 +151,9 @@ before using this shortcut.
 
 ## Select a period
 
-`start` and `end` are inclusive half-hour interval-end timestamps in UTC. Use
+`start` and `end` are inclusive half-hour interval-end timestamps in local
+standard time (without DST). R uses a UTC clock label without shifting these
+local clock readings; it does not mean the observations occurred in UTC. Use
 September 1 at midnight to include August's final half hour.
 
 ```r

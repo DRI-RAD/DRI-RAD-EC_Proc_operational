@@ -887,7 +887,7 @@ f <- df_plot %>%
 	geom_smooth(method = "lm", formula = "y ~ x + 0") +
 	labs(y = "corrected 710 ET (mm/day)",
 			 x = "corrected EC ET (mm/day)",
-			 title = paste0(site_id,"EBC EC vs EBC 710")) +
+			 title = paste0(site_id,": EBC EC vs EBC 710")) +
 	stat_poly_eq(use_label("eq"), formula = y ~ x + 0) +
 	stat_poly_eq(use_label("adj.R2"), formula = y ~ x,vjust = 1.7)
 

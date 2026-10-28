@@ -37,6 +37,24 @@ pipeline_despike <- function(x, var, ...) {
 # Backward-compatible name for the LI710 adapter.
 pipeline_li710_despike <- pipeline_despike
 
+# Assess each existing storage channel independently on the actual input clock.
+pipeline_storage_qc <- function(data) {
+  rows <- seq_len(nrow(data))
+  for (variable in intersect(c("SLE", "SH", "SC"), names(data))) {
+    if (!any(is.finite(data[[variable]][rows]))) next
+    x <- as.data.frame(data[rows, , drop = FALSE])
+    x$timestamp <- x$TIMESTAMP
+    if (any(!is.finite(x$PotRad))) stop(
+      "Storage QAQC: PotRad missing on actual upstream rows (first: ",
+      x$TIMESTAMP[which(!is.finite(x$PotRad))[1]],
+      "). Check L1 potential radiation.", call. = FALSE)
+    flag <- pipeline_despike(x, variable, iter = 10, light = "PotRad", z = 10)
+    rejected <- !is.na(flag) & flag >= 1
+    data[[variable]][rows[rejected]] <- NA_real_
+  }
+  data
+}
+
 pipeline_time <- function(x) {
   if (inherits(x, "POSIXt")) return(as.POSIXct(x, tz = "UTC"))
   # UTC is a fixed clock label, matching the original logger scripts. No DST shift.
@@ -79,12 +97,51 @@ pipeline_files <- function(path, pattern) {
   files[order(file.info(files)$mtime, files)]
 }
 
+pipeline_uncertainty_schema <- function(item, pattern) {
+  # Narrow additive migration for the four EddyPro uncertainty fields only.
+  # Old saved observations have unknown uncertainty: never reconstruct it.
+  if (!tolower(pattern) %in% c("level_3_ec_with_qaqc", "level_4_post_processed_data")) return(item)
+  for (v in c("LE", "H", "FC", "TAU")) {
+    name <- paste0(v, "_rand_err")
+    if (!name %in% names(item$data)) {
+      item$data[[name]] <- rep(NA_real_, nrow(item$data))
+      unit <- if (v == "FC") "umolCO2 m-2 s-1" else if (v == "TAU") "kg m-1 s-2" else "W m-2"
+      item$units[[name]] <- c(unit, rep(NA_character_, nrow(item$units) - 1L))
+    }
+  }
+  item
+}
+
+pipeline_le_quality_columns <- function() {
+  c("LE_PI_F_QC", "LE_MDS_QC", "LE_710_PI_F_QC", "LE_710_MDS_QC",
+    "LE_VBR_Ts_F_QC", "LE_VBR_Ts_MDS_QC", "LE_RE_F_QC", "LE_RE_MDS_QC")
+}
+
+pipeline_output_schema <- function(item, pattern) {
+  item <- pipeline_uncertainty_schema(item, pattern)
+  if (tolower(pattern) != "level_4_post_processed_data") return(item)
+  # Retire only the alternative VBR method. Old source/archive files are not
+  # rewritten on read. Never reinterpret alternative-method values as VBR-Ts.
+  retired <- c("VBR", "LE_VBR", "LE_VBR_F", "LE_VBR_MDS", "ET_VBR", "ET_VBR_F")
+  item$data <- item$data[, setdiff(names(item$data), retired), drop = FALSE]
+  item$units <- item$units[, setdiff(names(item$units), retired), drop = FALSE]
+  # Historical QC and discarded lower-quality predictions cannot be recovered
+  # from saved L4 values. Preserve values; require L4 reprocessing for backfill.
+  for (name in pipeline_le_quality_columns()) {
+    if (!name %in% names(item$data)) {
+      item$data[[name]] <- rep(NA_real_, nrow(item$data))
+      item$units[[name]] <- c("1", rep("quality flag", nrow(item$units) - 1L))
+    }
+  }
+  item
+}
+
 pipeline_history <- function(path, pattern) {
   files <- pipeline_files(path, pattern)
   if (!length(files)) return(NULL)
   result <- NULL
   for (file in files) {
-    item <- pipeline_read_table(file)
+    item <- pipeline_output_schema(pipeline_read_table(file), pattern)
     if (!is.null(result)) {
       if (!setequal(names(result$data), names(item$data)))
         stop("Output schema changed in ", file, "; migrate the history explicitly.")
@@ -94,6 +151,7 @@ pipeline_history <- function(path, pattern) {
     } else result <- item
   }
   result$data <- result$data[order(result$data$TIMESTAMP), ]
+  result$units <- result$units[, names(result$data), drop = FALSE]
   result
 }
 
@@ -171,13 +229,20 @@ pipeline_eddypro_file <- function(file) {
 
 pipeline_eddypro <- function(site_dir, window = NULL) {
   if (is.na(site_dir) || !dir.exists(site_dir)) stop("Configure an existing EddyPro site folder: ", site_dir)
-  files <- list.files(site_dir, pattern = "^eddypro_.*full_output.*\\.csv$",
+  # dir_eddypro is the complete site archive, including YYYY and YYYY_NN runs.
+  # Match the product name, not a mandatory EddyPro prefix or output subfolder.
+  files <- list.files(site_dir, pattern = "full_output.*\\.csv$",
                       recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
-  files <- files[tolower(basename(dirname(files))) == "output"]
-  if (!length(files)) stop("No EddyPro full_output CSV in month/output folders: ", site_dir)
+  if (!length(files)) stop("No EddyPro full_output CSV below dir_eddypro: ", site_dir)
   # Prefer the latest EddyPro run timestamp in filenames, then mtime and path.
-  # Folder month names are not trusted as observation bounds: reruns may overlap.
-  run <- sub(".*full_output_([0-9-]+T[0-9]+).*", "\\1", basename(files))
+  # Folder years/run suffixes are not observation bounds. If a filename has no
+  # standard run timestamp, use its modification time as the fallback priority.
+  stamp <- regmatches(basename(files), regexpr("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}", basename(files)))
+  run <- as.numeric(file.info(files)$mtime)
+  has_stamp <- grepl("[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}", basename(files))
+  parsed <- as.POSIXct(stamp, format = "%Y-%m-%dT%H%M%S", tz = "UTC")
+  if (anyNA(parsed)) stop("Invalid EddyPro run timestamp in a filename below: ", site_dir)
+  run[has_stamp] <- as.numeric(parsed)
   files <- files[order(run, file.info(files)$mtime, files)]
   result <- NULL
   for (file in files) {
@@ -231,15 +296,19 @@ pipeline_mds_window <- function(window, available, min_days = 100) {
   if (is.null(window)) return(NULL)
   required_start <- window$end - min_days * 86400 + 1800
   window$read_start <- min(window$read_start, required_start)
-  # Align the first observation to the end of a day's first half-hour.
-  window$read_start <- as.POSIXct(as.Date(window$read_start - 1800, tz = "UTC"), tz = "UTC") + 1800
+  # Keep the requested half-hour start. Do not round to midnight or create
+  # pre-deployment rows; any earlier MDS context must exist upstream.
   expected <- seq(window$read_start, window$end, by = 1800)
   missing <- expected[!expected %in% available]
+  first <- min(available)
   if (length(missing)) stop(
     "Insufficient Level 4 context: need common L1/L2/L3_EC timestamps from ",
     window$read_start, " through ", window$end, ". Missing ", length(missing),
     " rows (first: ", missing[1], "). Process the missing upstream period first with ",
-    "stages = c('L1', 'L2', 'L3_EC'), then rerun Level 4.")
+    "stages = c('L1', 'L2', 'L3_EC'), then rerun Level 4. ",
+    "Available common coverage: ", first, " through ", max(available),
+    "; requested minimum: ", min_days, " days. If the site was deployed later, ",
+    "earlier observations do not exist; choose an appropriate min_mds_days (at least 90) or wait for more data.")
   window$calculation_days <- length(expected) / 48
   window
 }

@@ -1,6 +1,15 @@
 # Run from the project root: Rscript tests/test_pipeline.R
 # Temporary fixtures exercise I/O and orchestration without modifying NAS data.
 source("run_pipeline.R")
+# These orchestration fixtures intentionally have only a dummy value column.
+# The real exporter is exercised separately in test_ameriflux.R.
+run_level5_ameriflux <- function(sites, base_dir, config_file) {
+  cfg <- readr::read_csv(config_file, show_col_types = FALSE)
+  output <- pipeline_path(base_dir, cfg$dir_output[match(sites, cfg$site)])
+  stopifnot(!dir.exists(file.path(output, ".pipeline-lock")),
+            length(pipeline_files(output, "Level_4_post_processed_data")) > 0)
+  setNames(list("export-tested"), sites)
+}
 test_root <- tempfile("pipeline-tests-")
 dir.create(test_root)
 check_error <- function(expr, text = NULL) {
@@ -141,8 +150,8 @@ stopifnot(identical(after$value, c(99, 99)))
 dir.create(file.path(cfg$dir_output, ".pipeline-lock"))
 check_error(do.call(run_pipeline, c(args, list(stages = "L1"))), "Site is locked")
 unlink(file.path(cfg$dir_output, ".pipeline-lock"), recursive = TRUE)
-# Verify the default six-site run and the stage-major reference dependency.
-network <- c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM")
+# Verify the default seven-site run and the stage-major reference dependency.
+network <- c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW")
 network_cfg <- cfg[rep(1, length(network)), ]
 network_cfg$site <- network
 network_cfg$dir_output <- file.path(fixture, "network", network)
@@ -152,7 +161,7 @@ for (stage in names(pipeline_stages)) {
     'site <- opt$sites',
     'folder <- opt$dirs$dir_output[opt$dirs$site == site]',
     if (stage == "L2") c(
-      'stopifnot(length(opt$reference_sites) == 6)',
+      'stopifnot(length(opt$reference_sites) == 7)',
       'for (ref in opt$reference_sites) {',
       '  ref_folder <- opt$dirs$dir_output[opt$dirs$site == ref]',
       '  stopifnot(length(pipeline_files(ref_folder, "Level_1_QAQCed_logger_data")) == 1)',
@@ -163,8 +172,9 @@ for (stage in names(pipeline_stages)) {
   writeLines(script, file.path(fixture, pipeline_stages[[stage]]))
 }
 network_result <- run_pipeline(base_dir = fixture, config_file = file.path(fixture, "network.csv"))
-stopifnot(length(network_result) == 30, all(file.exists(unlist(network_result))))
-stopifnot(identical(names(network_result)[1:6], paste(network, "L1", sep = ":")))
+stopifnot(length(network_result) == 35, all(file.exists(unlist(network_result))))
+stopifnot(length(attr(network_result, "ameriflux")) == 7)
+stopifnot(identical(names(network_result)[1:7], paste(network, "L1", sep = ":")))
 stopifnot(all(unlist(run_pipeline(base_dir = fixture, config_file = file.path(fixture, "network.csv"))) == "skipped"))
 # A single target may load other sites only as L2 references. Invalid raw paths
 # for unselected sites must never be accessed and their outputs must not change.
@@ -185,6 +195,23 @@ optional <- run_pipeline(sites = "ECSM", stages = c("L3_LI710", "L4"),
   base_dir = fixture, config_file = file.path(fixture, "network.csv"),
   start = clock[1], end = clock[2], reprocess = TRUE)
 stopifnot(optional[["ECSM:L3_LI710"]] == "skipped", file.exists(optional[["ECSM:L4"]]))
+# A reference deployed later must not block an older target calculation window.
+estw_out <- network_cfg$dir_output[network_cfg$site == "ESTW"]
+estw_input <- pipeline_files(estw_out, pipeline_patterns[["L1"]])
+unlink(estw_input)
+late <- data.frame(TIMESTAMP = clock[1:2] + 86400, value = 1)
+pipeline_write_table(late, units, file.path(estw_out, "ESTW_Level_1_QAQCed_logger_data_later.csv"), "later deployment")
+script <- c('opt <- getOption("ec.pipeline")',
+  'stopifnot(identical(opt$reference_sites, "ECSM"))',
+  'x <- data.frame(TIMESTAMP = opt$window$pending, value = 5)',
+  'u <- data.frame(TIMESTAMP = c("TS", NA), value = c("W m-2", "avg"))',
+  'folder <- opt$dirs$dir_output[opt$dirs$site == opt$sites]',
+  'pipeline_write(x, u, file.path(folder, "ECSM_Level_2_PI_vars_logger_data_fixture.csv"))')
+writeLines(script, file.path(fixture, pipeline_stages[["L2"]]))
+late_result <- run_pipeline(sites = "ECSM", stages = "L2", reference_sites = c("ECSM", "ESTW"),
+  base_dir = fixture, config_file = file.path(fixture, "network.csv"),
+  start = clock[1], end = clock[2], reprocess = TRUE)
+stopifnot(file.exists(late_result[["ECSM:L2"]]))
 pipeline_level4_figures <- real_figures
 pipeline_mds_window <- real_mds_window
 .pipeline_root <- real_root

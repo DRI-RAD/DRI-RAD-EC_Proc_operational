@@ -7,11 +7,11 @@ source(file.path(.amf_root, "R", "pipeline_io.R"), encoding = "UTF-8")
 source(file.path(.amf_root, "R", "Level_5_AmeriFlux_export.R"), encoding = "UTF-8")
 
 run_level5_ameriflux <- function(
-  sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM"),
+  sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW"),
   base_dir = "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations",
   config_file = file.path(.amf_root, "meta_files", "file_directions_new.csv"),
   start = NULL, end = NULL, output_dir = NULL, dry_run = FALSE,
-  unit_overrides = character(), extra_mapping = NULL) {
+  unit_overrides = character(), extra_mapping = NULL, include_pi = FALSE) {
   # start/end select inclusive LOCAL-STANDARD interval-end observations.
   # NULL bounds mean all saved Level 4 data, without rereading raw/EddyPro files.
   dirs <- readr::read_csv(config_file, show_col_types = FALSE)
@@ -29,7 +29,8 @@ run_level5_ameriflux <- function(
     if (!length(files)) stop("No Level 4 output for ", site)
     item <- pipeline_history(site_output, "Level_4_post_processed_data")
     prepared <- amf_prepare(item, start = start, end = end,
-                            unit_overrides = unit_overrides, extra_mapping = extra_mapping)
+                            unit_overrides = unit_overrides, extra_mapping = extra_mapping,
+                            include_pi = include_pi)
     message(site, ": ", nrow(prepared$data), " half-hours; ", ncol(prepared$data) - 2L,
             " variables; ", sum(prepared$audit$status == "omitted"), " unit/mapping omissions.")
     omissions <- prepared$audit[prepared$audit$status == "omitted", c("source", "note"), drop = FALSE]

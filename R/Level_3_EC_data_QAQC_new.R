@@ -24,7 +24,7 @@ base_dir <- pipeline_options$base_dir
 #### Define interesting site 
 ################################################################################
 # site id for runing this code
-# currently supported site: ECDP EDVG EDVP ERVA ERVP
+# Supported sites: ECDP EDVG EDVP ERVA ERVP ECSM ESTW.
 
 # single site
 # The runner supplies the selected site.
@@ -158,7 +158,8 @@ df_unit <- met_unit %>%
 ################################################################################
 #### Load EddyPro output 
 ################################################################################
-# Read site/month_year/output/eddypro_*_full_output_*.csv by field names.
+# Read all full_output CSVs below dir_eddypro (site/YYYY or site/YYYY_NN).
+# EddyPro CSVs supply the entire EC history; dir_EC Excel files are not used.
 # The runner validates and loads the files once, then shares the selected window.
 if(TRUE){
   EP <- pipeline_slice(pipeline_options$eddypro$data)
@@ -352,12 +353,19 @@ EC <- EC %>%
          SLE = ifelse(processing == "EddyPro", SLE_EddyPro,NA),
          SH = ifelse(processing == "EddyPro", SH_EddyPro,NA),
          SC = ifelse(processing == "EddyPro", SC_EddyPro,NA),
+         # Random uncertainty belongs to the selected EddyPro turbulent flux.
+         # It is neither modeled for EasyFlux rows nor propagated through MDS.
+         LE_rand_err = ifelse(processing == "EddyPro", LE_rand_err_EddyPro, NA_real_),
+         H_rand_err = ifelse(processing == "EddyPro", H_rand_err_EddyPro, NA_real_),
+         FC_rand_err = ifelse(processing == "EddyPro", FC_rand_err_EddyPro, NA_real_),
+         TAU_rand_err = ifelse(processing == "EddyPro", TAU_rand_err_EddyPro, NA_real_),
          ) %>%
   select(c('TIMESTAMP','SW_IN_PI_F','TA_PI_F','RH_PI_F','VPD_PI_F','CO2_sig_strgth_Min','H2O_sig_strgth_Min','PotRad',
            'processing','LE', 'LE_SSITC_TEST', 'H', 'H_SSITC_TEST','FC', 'FC_SSITC_TEST', 'TAU', 'TAU_SSITC_TEST',
            'CO2','CO2_SIGMA','H2O','H2O_SIGMA',"T_SONIC","T_SONIC_SIGMA",
            'WS',"WS_MAX",'WD','USTAR',"ZL",'MO_LENGTH', "U_SIGMA","V_SIGMA","W_SIGMA",
-           "FETCH_90", "FETCH_70",'SLE','SH','SC'))
+           "FETCH_90", "FETCH_70",'SLE','SH','SC',
+           'LE_rand_err','H_rand_err','FC_rand_err','TAU_rand_err'))
 
 
 
@@ -382,6 +390,15 @@ EC_unit <- EC_unit %>%
          SH = H,
          SC = FC
          )
+
+# Preserve the EddyPro uncertainty units, falling back to the matching flux
+# unit only when this optional uncertainty field was absent in the input.
+for (v in c("LE", "H", "FC", "TAU")) {
+  u <- as.character(df_unit[[paste0(v, "_rand_err_EddyPro")]])
+  fallback <- as.character(df_unit[[paste0(v, "_EddyPro")]])
+  u[is.na(u)] <- fallback[is.na(u)]
+  EC_unit[[paste0(v, "_rand_err")]] <- u
+}
 
 ################################################################################
 #### QC column

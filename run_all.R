@@ -1,4 +1,4 @@
-# Run all six main-network sites, completing each level before the next level.
+# Run all seven main-network sites, completing each level before the next level.
 # Source this file in RStudio, or execute Rscript /path/to/run_all.R.
 .run_sources <- Filter(function(x) !is.null(x), lapply(sys.frames(), function(x) x$ofile))
 .run_file <- if (length(.run_sources)) tail(.run_sources, 1)[[1]] else {

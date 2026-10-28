@@ -10,6 +10,7 @@ if (!length(.pipeline_script) || is.na(.pipeline_script)) {
 source(file.path(.pipeline_root, "R", "pipeline_io.R"))
 source(file.path(.pipeline_root, "R", "pipeline_li710.R"))
 source(file.path(.pipeline_root, "R", "pipeline_level4_figures.R"))
+source(file.path(.pipeline_root, "run_level5_ameriflux.R"), encoding = "UTF-8")
 
 pipeline_stages <- c(
   L1 = "R/Level_1_met_QAQC_new.R",
@@ -28,12 +29,15 @@ pipeline_patterns <- c(
 
 source(file.path(.pipeline_root, "R", "pipeline_publication.R"))
 
-run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM"), start = NULL, end = NULL,
+run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW"), start = NULL, end = NULL,
                          base_dir = "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations",
                          config_file = file.path(.pipeline_root, "meta_files", "file_directions_new.csv"),
                          stages = names(pipeline_stages), reference_sites = NULL,
                          context_days = 0, reprocess = FALSE, dry_run = FALSE,
-                         min_mds_days = 100, figure_period = "new") {
+                         min_mds_days = 100, figure_period = "new",
+                         export_ameriflux = TRUE) {
+  if (!is.logical(export_ameriflux) || length(export_ameriflux) != 1L || is.na(export_ameriflux))
+    stop("export_ameriflux must be TRUE or FALSE.")
   # start/end are inclusive half-hour observation timestamps, not file dates.
   # context_days adds preceding observations for boundary calculations only;
   # already-processed values are never rewritten unless reprocess = TRUE.
@@ -63,13 +67,13 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
   missing <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]
   if (length(missing)) stop("Install required packages first: ", paste(missing, collapse = ", "))
   dirs <- readr::read_csv(config_file, show_col_types = FALSE)
-  supported <- c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM")
+  supported <- c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW")
   if (!length(sites) || any(!sites %in% supported) || any(!sites %in% dirs$site))
-    stop("The new runner supports the six main-network sites; variation scripts require separate adapters.")
+    stop("Supported sites: ", paste(supported, collapse = ", "), ". Each must exist in the configuration.")
   if (anyDuplicated(dirs$site)) stop("Duplicate site identifiers in configuration.")
   if (!"dir_eddypro" %in% names(dirs)) stop("Configuration must contain dir_eddypro.")
   sites <- unique(sites)
-  # Preserve the original Level 2 cross-site reference pool by default.
+  # Use all configured network sites as the default Level 2 reference pool.
   if (is.null(reference_sites)) reference_sites <- if ("L2" %in% stages) supported else sites
   reference_sites <- unique(c(sites, reference_sites))
   if (any(!reference_sites %in% supported) || any(!reference_sites %in% dirs$site)) stop("Unknown reference site.")
@@ -121,6 +125,7 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
       as.POSIXct(min(pending), origin = "1970-01-01", tz = "UTC"), site_end[[site]])
   }
   results <- list()
+  ameriflux <- list()
   # Stage-major order makes every selected site's new L1 available to L2.
   for (stage in stages) for (site in sites) {
     row <- dirs[dirs$site == site, ]
@@ -156,7 +161,9 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
           available <- if (length(raw_times)) available[available >= min(raw_times) & available <= max(raw_times)] else available[FALSE]
       }
       window <- pipeline_plan(available, history_for(site, stage), start, site_end[[site]], context_days, reprocess)
-      if (stage == "L4") window <- pipeline_mds_window(window, available, min_mds_days)
+      if (stage == "L4") window <- tryCatch(
+        pipeline_mds_window(window, available, min_mds_days),
+        error = function(e) stop(site, ":L4: ", conditionMessage(e), call. = FALSE))
       if (!is.null(window) && automatic_end) window$figure_bounds <- figure_bounds[[site]]
       key <- paste(site, stage, sep = ":")
       if (is.null(window)) {
@@ -191,6 +198,13 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
                 item$data <- pipeline_slice(item$data, window)
                 if (!nrow(item$data) && up == "L3_LI710" && stage == "L4")
                   item <- pipeline_empty_li710(seq(window$read_start, window$end, by = 1800))
+                # A later deployment (e.g. ESTW) cannot supply earlier reference
+                # observations. Omit only non-target L2 references with no overlap.
+                if (!nrow(item$data) && stage == "L2" && ref != site) {
+                  message("Skipping L2 reference ", ref, ": no observations in this window.")
+                  refs <- setdiff(refs, ref)
+                  next
+                }
                 if (!nrow(item$data)) stop("Reference input has no data in this window: ", ref)
                 pipeline_write_table(item$data, item$units,
                     file.path(folder, paste0(ref, "_", pipeline_patterns[[up]], "_input.csv")),
@@ -210,6 +224,24 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
         }
       }
     }, finally = { if (!dry_run) unlink(lock, recursive = TRUE) })
+    # Export the complete cumulative L4 snapshot after releasing the write lock.
+    # Also export when L4 is already current; a previous failed export can then
+    # be retried without repeating scientific processing. Preview writes nothing.
+    if (stage == "L4" && export_ameriflux) {
+      if (dry_run) {
+        message(site, ": AmeriFlux export planned from the complete saved Level 4 period.")
+        ameriflux[[site]] <- "planned"
+      } else {
+        exported <- tryCatch(run_level5_ameriflux(sites = site, base_dir = base_dir,
+          config_file = config_file), error = function(e) {
+            stop(site, ": Level 4 is saved, but AmeriFlux export failed: ", conditionMessage(e),
+                 ". Retry with run_level5_ameriflux() after resolving the export error.", call. = FALSE)
+          })
+        ameriflux[[site]] <- exported[[site]]
+      }
+    }
   }
+  # Preserve the existing stage-result list interface.
+  attr(results, "ameriflux") <- ameriflux
   invisible(results)
 }

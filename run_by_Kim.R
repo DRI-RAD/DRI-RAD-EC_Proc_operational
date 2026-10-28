@@ -4,25 +4,47 @@ data_root <- "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/
 # Another computer can use, for example, data_root <- "D:/eddy_stations".
 
 run_pipeline(
-  sites = "EDVP",
   base_dir = data_root,
-  start = "2026-06-20 00:30:00",
-  end = "2026-08-01 00:00:00",
-  min_mds_days = 100,
-  figure_period = "new",  # Figures show only the pending period; MDS context is excluded.
-  dry_run = FALSE,
-  reprocess = TRUE
+  sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW"),
+  reprocess = TRUE,
+  start = NULL,
+  end = NULL,
+  min_mds_days = 90,
+  dry_run = FALSE
 )
 
-# All six sites. Every site's L1 finishes before L2 uses cross-site references.
+# 
 run_pipeline(
   base_dir = data_root,
-  start = "2026-08-01 00:00:00",
+  sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW"),
+  stages = "L4",
+  reprocess = TRUE,
+  start = NULL,
   end = NULL,
-  min_mds_days = 100,
-  dry_run = FALSE,
-  reprocess = TRUE
+  min_mds_days = 90
 )
+# 
+# 
+# run_pipeline(
+#   sites = "EDVP",
+#   base_dir = data_root,
+#   start = "2026-06-20 00:30:00",
+#   end = "2026-08-01 00:00:00",
+#   min_mds_days = 100,
+#   figure_period = "new",  # Figures show only the pending period; MDS context is excluded.
+#   dry_run = FALSE,
+#   reprocess = TRUE
+# )
+# 
+# # All six sites. Every site's L1 finishes before L2 uses cross-site references.
+# run_pipeline(
+#   base_dir = data_root,
+#   start = "2026-08-01 00:00:00",
+#   end = NULL,
+#   min_mds_days = 100,
+#   dry_run = FALSE,
+#   reprocess = TRUE
+# )
 
 # Single target site. Only L2 reads other sites' EXISTING Level 1 results.
 # Other sites' raw logger/EddyPro files are not read and their outputs are not updated.

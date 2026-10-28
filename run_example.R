@@ -3,7 +3,11 @@ source("run_pipeline.R")
 data_root <- "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations"
 # Another computer can use, for example, data_root <- "D:/eddy_stations".
 
-# All six sites. Every site's L1 finishes before L2 uses cross-site references.
+# All seven sites. Every site's L1 finishes before L2 uses cross-site references.
+# For full-history rebuilding after an EddyPro rerun, use:
+# run_pipeline(base_dir = data_root, start = NULL, end = NULL,
+#              reprocess = TRUE, dry_run = TRUE)
+# Change dry_run to FALSE after reviewing the plan.
 run_pipeline(
   base_dir = data_root,
   start = NULL,
@@ -19,7 +23,7 @@ run_pipeline(
 #   base_dir = data_root,
 #   start = "2026-08-01 00:30:00",
 #   end = "2026-09-01 00:00:00",
-#   reference_sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM"),
+#   reference_sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW"),
 #   min_mds_days = 100,
 #   figure_period = "new",  # Figures show only the pending period; MDS context is excluded.
 #   dry_run = TRUE

@@ -27,7 +27,7 @@ base_dir <- pipeline_options$base_dir
 #### Define interesting site and load meta
 ################################################################################
 # site id for runing this code
-# currently supported site: ECDP EDVG EDVP ERVA ERVP ECSM
+# Supported sites: ECDP EDVG EDVP ERVA ERVP ECSM ESTW.
 
 # single site
 # The runner supplies the selected site.

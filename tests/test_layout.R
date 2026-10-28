@@ -8,7 +8,7 @@ source(file.path(project, "run_pipeline.R"))
 stopifnot(identical(.pipeline_root, project))
 stopifnot(all(file.exists(file.path(.pipeline_root, pipeline_stages))))
 stopifnot(identical(eval(formals(run_pipeline)$sites),
-                    c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM")))
+                    c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW")))
 config <- eval(formals(run_pipeline)$config_file)
 stopifnot(file.exists(config))
 dirs <- readr::read_csv(config, show_col_types = FALSE)

@@ -1,17 +1,37 @@
 # DRI-RAD Eddy Covariance Processing Pipeline
 
 This repository processes logger and EddyPro data for NICE NET (DRI) eddy
-covariance sites: ECDP, EDVG, EDVP, ERVA, ERVP, and ECSM. It runs meteorological
+covariance sites: ECDP, EDVG, EDVP, ERVA, ERVP, ECSM, and ESTW. It runs meteorological
 QAQC, multi-site meteorological gap filling, EC and LI-710 QAQC, REddyProc MDS
 gap filling, ET calculations, and diagnostic figures.
 
-To prepare an AmeriFlux review file from existing Level 4 results, use
+An AmeriFlux review export is created automatically after each site's Level 4
+step, including runs with no new L4 observations. It contains the complete saved
+L4 period. `dry_run = TRUE` only previews this step; runs excluding L4 do not
+export. Use `export_ameriflux = FALSE` to disable it explicitly.
+The default review export includes existing EC `LE_PI_F`, `H_PI_F`, and `FC_PI_F`
+(L4 QC, storage fallback and MDS; no EBR correction). These retain local PI names
+and require submission mapping with the AmeriFlux Data Team. Other PI/corrected
+columns are opt-in via `include_pi = TRUE`. Base meteorology
+is from L1 QC before L2 filling. Bulk/tipping-bucket precipitation use
+`P_1_1_1`/`P_1_1_2`; `P_F_1_1_1` is the separate L2 filled precipitation series.
+EC LE/H use `_1_1_1`; LI-710 LE/H use `_1_1_2`, with their L4 MDS-filled results
+separately labeled `LE_F_1_1_2`/`H_F_1_1_2`. Existing EC storage-inclusive PI
+results are not relabeled as turbulent filled fluxes. Scientific calculations
+are unchanged. Confirm sensor indices against the submitted site metadata.
+To export existing Level 4 results independently, use
 `source("run_level5_ameriflux.R")` followed by
-`run_level5_ameriflux(base_dir = data_root)`. All six sites are selected by
-default. This separate export step preserves the input files. See
+`run_level5_ameriflux(base_dir = data_root)`. All seven sites are selected by
+default. The exporter preserves the input files. See
 [Level 5 instructions and variable mapping](AMERIFLUX_LEVEL5.md), including
 the requested flux QC policy and the distinction between local `_PI` review
 columns and final AmeriFlux submission labels.
+
+EddyPro random uncertainties (`LE_rand_err`, `H_rand_err`, `FC_rand_err`,
+`TAU_rand_err`) are retained in L3 and carried unchanged into L4. Existing older
+rows without those fields read as NA. Reprocess L3_EC and L4, or the full pipeline,
+to populate them from the original CSVs; incremental processing alone does not
+backfill historical uncertainty. These are not filled-product uncertainty estimates.
 
 ## Software and package installation
 
@@ -113,13 +133,46 @@ paths.
 EddyPro files are discovered below each configured site folder:
 
 ```text
-<base_dir>/EddyPro_Output_Files/<site>/<month_year>/output/
-    eddypro_<site>_full_output_<run_timestamp>_adv.csv
+<base_dir>/EddyPro_Output_Files_YK/<site_id>/YYYY/*full_output*.csv
+<base_dir>/EddyPro_Output_Files_YK/<site_id>/YYYY_01/*full_output*.csv
+<base_dir>/EddyPro_Output_Files_YK/<site_id>/YYYY_02/*full_output*.csv
 ```
 
 The reader detects field names and units, converts `-9999` to missing values,
 creates `TIMESTAMP` from `date` and `time`, and uses the latest run when exports
-overlap.
+overlap. `dir_eddypro` in `meta_files/file_directions_new.csv` must point to the
+site folder (for example `/EddyPro_Output_Files_YK/ESTW`). All matching CSVs below
+that folder are read recursively; an `output` subfolder is not required. These
+CSVs now supply the entire EC history. The legacy `dir_EC` column is unused by
+this runner; no Excel EC summary is read or used as a fallback.
+
+For duplicate observation timestamps, the latest run timestamp in the filename
+(`YYYY-MM-DDTHHMMSS`) wins, with modification time and path breaking ties. Files
+without a run timestamp use modification time as their priority. The complete
+winning row is retained, including missing values; older valid values do not
+replace missing values from a newer run. Year folder names do not limit data
+coverage. Keep only the intended full-output runs below each configured folder.
+
+### Reprocess all seven sites after rerunning EddyPro
+
+```r
+source("run_pipeline.R")
+run_pipeline(base_dir = data_root, start = NULL, end = NULL,
+             reprocess = TRUE, dry_run = TRUE)
+# After reviewing the plan:
+run_pipeline(base_dir = data_root, start = NULL, end = NULL,
+             reprocess = TRUE, dry_run = FALSE)
+```
+
+The default targets are ECDP, EDVG, EDVP, ERVA, ERVP, ECSM, and ESTW.
+With `reprocess = TRUE`, existing timestamps are processed again. A NULL start
+uses each stage's earliest available input; a NULL end stops at each site's
+latest EddyPro observation. All L1 outputs are prepared before L2 begins.
+An L2 reference site with no observations overlapping the calculation window
+is omitted for that window, so a later deployment does not block older data.
+Missing reference output files still require an upstream L1 run. Existing
+output/archive behavior is unchanged; rows outside the reprocessed window are
+retained. This does not delete historical output files to start over.
 
 ## First run: preview, then process
 
@@ -129,7 +182,7 @@ Loading the runner does not start processing:
 source("run_pipeline.R")
 ```
 
-Preview all six sites without writing output:
+Preview all seven sites without writing output:
 
 ```r
 run_pipeline(base_dir = data_root, dry_run = TRUE)
@@ -200,7 +253,7 @@ run_pipeline(
 )
 ```
 
-Only ECSM raw data and outputs are processed. Level 2 reads the other five sites'
+Only ECSM raw data and outputs are processed. Level 2 reads the other six sites'
 existing Level 1 outputs as meteorological predictors; it does not read their
 raw data or update them. Run all sites first when the reference Level 1 products
 need updating.
@@ -266,11 +319,35 @@ Stages with the same pending bounds share the directory. These figures exclude
 MDS training context. Reprocessing the same period replaces matching filenames
 in that directory. No automatic plots PDF is generated.
 
-Level 4 also renders the same five diagnostic figures from the merged cumulative
+Level 4 also renders the same six diagnostic figures from the merged cumulative
 output, directly under `figures/`, with a `_full_period.jpeg` suffix. Only these
 full-period files are overwritten on subsequent L4 updates. Historical QAQC and
 MDS are not rerun to draw cumulative figures. Existing figures, `figure_archive`
 and legacy `runs` directories are left untouched for manual organization.
+
+Daily energy-balance scatter and time-series panels (EC and LI-710, corrected
+and uncorrected) use only days with 48 distinct half-hourly timestamps and finite
+values for all four plotted components: NETRAD_PI_F, G_PI_F and the corresponding
+LE/H pair. Dates use interval starts (TIMESTAMP minus 30 minutes). Incomplete
+days remain missing on the plotting calendar rather than being connected by a
+line. Existing half-hourly and mean-diurnal energy panels are unchanged.
+
+Water-balance diagnostics are saved separately as
+`<site>_Level_4_Figure_2a_water_balance_EC.jpeg` and
+`<site>_Level_4_Figure_2b_water_balance_LI710.jpeg`. Each uses the first through
+last timestamp where that instrument has both filled and corrected ET, within
+the period supplied to the figure function. The two full-period files therefore
+have independent instrument coverage. An absent instrument produces a labeled
+placeholder. Old combined water-balance figures are not deleted.
+
+Daily ET requires complete paired uncorrected/corrected days. Cumulative ET and
+precipitation use the same days with all 48 ET, corrected ET and precipitation
+values present. They resume after missing days as **complete-day subtotals**, not
+estimates of flux during the missing intervals; the figure reports included and
+total day counts. Missing dates break ribbons/lines. Ribbon bounds use finite
+paired minima/maxima, including when corrected ET is below uncorrected ET.
+SSM retains the 0.08 m soil-layer assumption and is referenced to the first
+available daily soil-moisture value in that instrument's period.
 
 ## Outputs and reprocessing
 
@@ -332,6 +409,14 @@ stopping processing. The final calorimetric `G_PI` calculation is unchanged.
 
 ## Troubleshooting
 
+- L4 keeps the actual half-hourly start, including a mid-day deployment. It does
+  not align to 00:30 or insert leading NA rows. Any additional MDS context must
+  already exist upstream. Missing interior upstream rows and genuinely insufficient
+  history still stop processing. L4 planning errors identify the site.
+- `min_mds_days = 100` is a requested minimum, not fabricated pre-deployment data.
+  A site with 90-99 days of common upstream coverage can be run separately with
+  `min_mds_days = 90`; sites below 90 days require additional observations.
+
 - `base_dir is not an accessible data root`: confirm the path and mount the
   network drive in Windows first.
 - `Missing L1/L2/L3 output`: run the full pipeline or the missing upstream stages.
@@ -340,17 +425,45 @@ stopping processing. The final calorimetric `G_PI` calculation is unchanged.
 - Package installation failure: restart RStudio, verify internet/CRAN/GitHub
   access, and install matching Rtools if R requests build tools.
 
-## VBR and VBR_Ts MDS comparison outputs
+## LE MDS predictions, quality flags, and VBR-Ts
 
-`LE_VBR_MDS` and `LE_VBR_Ts_MDS` retain their respective MDS estimates only
-where that estimate's `*_fall_qc` equals 1. VBR without the `_Ts` suffix is
-retained for testing only and was not used for the study analysis; VBR_Ts was used.
+L4 saves all available MDS FillAll predictions, without restricting them to
+quality code 1. This applies to EC, LI-710, VBR-Ts and residual-energy LE only.
+Failed predictions remain missing. FillAll predictions can exist at measured
+timestamps; they are not the same as observed-plus-gap-filled series.
 
-The earlier export block overwrote the VBR estimate with the Ts estimate and
-left the Ts comparison column unmasked. This is now corrected. The separate
-filled series `LE_VBR_Ts_F` and `ET_VBR_Ts_F` are unchanged by this export fix.
-Existing CSVs are not rewritten automatically: use explicit period bounds and
-`reprocess = TRUE` for Level 4 to regenerate already processed rows.
+| MDS prediction | Prediction quality | Observed-plus-filled series | Series quality |
+| --- | --- | --- | --- |
+| LE_MDS | LE_MDS_QC | LE_PI_F | LE_PI_F_QC |
+| LE_710_MDS | LE_710_MDS_QC | LE_710_PI_F | LE_710_PI_F_QC |
+| LE_VBR_Ts_MDS | LE_VBR_Ts_MDS_QC | LE_VBR_Ts_F | LE_VBR_Ts_F_QC |
+| LE_RE_MDS | LE_RE_MDS_QC | LE_RE_F | LE_RE_F_QC |
+
+Prediction flags preserve REddyProc `*_fall_qc`; series flags preserve `*_fqc`.
+Codes 1, 2 and 3 denote good, medium and poor MDS quality; 0 in the series flag
+denotes an original input observation. Missing flags remain missing. These flags
+describe MDS quality, not the quality of an energy-balance correction. No H or
+FC MDS quality columns are added. Existing filled fluxes, EBR corrections and
+retained ET products are unchanged. These are L4 columns; L5 mapping is unchanged.
+
+Only `VBR_Ts = 1004.834 * sigma_Ts / (Lv * sigma_q)` is calculated, with existing
+LE_VBR_Ts and ET_VBR_Ts names retained. The alternative with the temperature
+subtraction, and its VBR/LE_VBR/ET_VBR output family, are removed. Diagnostic
+VBR panels now use VBR-Ts.
+
+When merging old L4 history, retired columns are dropped in memory and missing
+quality columns are padded with NA. Saved files and archives are not edited on
+read. Previously discarded predictions cannot be recovered without reprocessing;
+old quality flags are not inferred. To regenerate the entire saved period:
+
+```r
+run_pipeline(base_dir = data_root, stages = "L4", reprocess = TRUE,
+             start = NULL, end = NULL)
+```
+
+This uses existing upstream products and still requires their full MDS context.
+Incremental runs retain historical prediction values and unknown flags outside
+the newly processed interval. L4 publication continues to archive previous files.
 
 ## Tests
 

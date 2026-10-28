@@ -120,6 +120,8 @@ ec <- read_csv(latest_file, skip = 4, col_names = FALSE)
 colnames(ec) <- colnames(ec_unit)
 # Restrict input to the requested calculation window before processing.
 ec <- pipeline_slice(ec)
+# Keep L3 LE/H/FC/TAU_rand_err and their units in the merged L4 product.
+# These are unfilled EddyPro uncertainties; MDS and EBR do not transform them.
 
 df <- left_join(df,ec, by = 'TIMESTAMP')
 df_unit <- left_join(df_unit, ec_unit, by = 'TIMESTAMP')
@@ -190,20 +192,8 @@ df <- df %>%
 ################################################################################
 #### Storage term apply
 ################################################################################
-if(sum(!is.na(df$SLE)) > 0){
-  flag <- despikeLF(as.data.frame(df %>% mutate(timestamp = TIMESTAMP)),
-                    "SLE",iter = 10,light = "PotRad", z = 10)
-  flag[is.na(flag)] <- 0
-  df$SLE <- ifelse(flag >= 1, NA, df$SLE)
-  flag <- despikeLF(as.data.frame(df %>% mutate(timestamp = TIMESTAMP)),
-                    "SH",iter = 10,light = "PotRad", z = 10)
-  flag[is.na(flag)] <- 0
-  df$SH <- ifelse(flag >= 1, NA, df$SH)
-  flag <- despikeLF(as.data.frame(df %>% mutate(timestamp = TIMESTAMP)),
-                    "SC",iter = 10,light = "PotRad", z = 10)
-  flag[is.na(flag)] <- 0
-  df$SC <- ifelse(flag >= 1, NA, df$SC)
-}
+# Assess storage channels independently on the actual input timestamps.
+df <- pipeline_storage_qc(df)
 
 df <- df %>%
 	mutate(
@@ -291,9 +281,8 @@ pipeline_capture_mds(EddyData, EProc$sExportResults(), c(LE = "LE", H = "H", NEE
 
 MDSout <- data.frame(TIMESTAMP = EddyData$TIMESTAMP, 
 										 EProc$sExportResults() %>% 
-										   mutate(LE_fall = ifelse(LE_fall_qc == 1, LE_fall, NA)) %>%
-										 	select(LE_f, LE_fall,H_f, NEE_f) %>%
-										 	rename( LE_PI_F = LE_f, LE_MDS= LE_fall, H_PI_F = H_f, FC_PI_F = NEE_f)
+										 	select(LE_f, LE_fqc, LE_fall, LE_fall_qc, H_f, NEE_f) %>%
+										 	rename( LE_PI_F = LE_f, LE_PI_F_QC = LE_fqc, LE_MDS = LE_fall, LE_MDS_QC = LE_fall_qc, H_PI_F = H_f, FC_PI_F = NEE_f)
 										 )
 
 df <- left_join(df, MDSout)
@@ -325,8 +314,8 @@ EddyDataWithPosix <- EddyData %>%
 pipeline_validate_mds(EddyData$TIMESTAMP)
 #++ Fill NEE gaps with MDS gap filling algorithm (without prior ustar filtering)
 # Preserve missing LI710 channels rather than attempting MDS with no observations.
-mds_li <- as.data.frame(matrix(NA_real_, nrow = nrow(EddyData), ncol = 5))
-names(mds_li) <- c("LE_f", "LE_fall", "H_f", "LE_fqc", "H_fqc")
+mds_li <- as.data.frame(matrix(NA_real_, nrow = nrow(EddyData), ncol = 6))
+names(mds_li) <- c("LE_f", "LE_fall", "H_f", "LE_fqc", "H_fqc", "LE_fall_qc")
 if (any(is.finite(EddyData$LE)) || any(is.finite(EddyData$H))) {
 EProc <- sEddyProc$new(
 	site_id, EddyDataWithPosix, c('Rg','Tair','VPD', 'Ustar', 'LE', 'H'))
@@ -334,12 +323,11 @@ if (any(is.finite(EddyData$LE))) EProc$sMDSGapFill('LE', FillAll = TRUE)
 if (any(is.finite(EddyData$H))) EProc$sMDSGapFill('H', FillAll = FALSE)
 export_li <- EProc$sExportResults()
 for (name in intersect(names(mds_li), names(export_li))) mds_li[[name]] <- export_li[[name]]
-if ("LE_fall_qc" %in% names(export_li))
-  mds_li$LE_fall <- ifelse(export_li$LE_fall_qc == 1, mds_li$LE_fall, NA_real_)
 }
 pipeline_capture_mds(EddyData, mds_li, c(LE = "LE_710", H = "H_710"))
 MDSout <- data.frame(TIMESTAMP = EddyData$TIMESTAMP, LE_710_PI_F = mds_li$LE_f,
-                     LE_710_MDS = mds_li$LE_fall, H_710_PI_F = mds_li$H_f)
+                     LE_710_MDS = mds_li$LE_fall, H_710_PI_F = mds_li$H_f,
+                     LE_710_PI_F_QC = mds_li$LE_fqc, LE_710_MDS_QC = mds_li$LE_fall_qc)
 df <- left_join(df, MDSout)
 
 
@@ -409,8 +397,8 @@ df <- df %>%
 ################################################################################
 #### energy balance approach: VBR and residual energy
 ################################################################################
-# VBR without the _Ts suffix is TEST ONLY; not used for the study analysis.
-# VBR_Ts was used for analysis. Keep each MDS estimate and its QC mask separate.
+# Only the sonic-temperature VBR is retained: cp * sigma_Ts / (Lv * sigma_q).
+# Preserve the _Ts names; do not reuse the removed alternative-method names.
 # Variance Bowen ratio 
 # T_SONIC_SIGMA  : sonic temperature sd [K]
 # H2O_SIGMA : water vapor sd [mmolH2O mol-1]
@@ -419,23 +407,19 @@ df <- df %>%
 df <- df %>%
 	mutate(lv = latent.heat.vaporization(TA_PI_F),
 				 q_SIGMA =  0.622 * (H2O_SIGMA / 1000) / (1 - (1 - 0.622) * H2O / 1000),
-				 VBR = 1004.834/lv * (T_SONIC_SIGMA/q_SIGMA - 0.51 * (TA_PI_F + 273.15)),
 				 VBR_Ts = 1004.834/lv * (T_SONIC_SIGMA/q_SIGMA),
-				 LE_VBR = (NETRAD - G_PI)/(1+VBR),
 				 LE_VBR_Ts = (NETRAD - G_PI)/(1+VBR_Ts),
 				 
 				 #residual energy LE
-				 # H_VBR = un_H * H_scf / (1+0.51*1004.834*(TA_PI_F + 273.15)/(lv*VBR)),
 				 LE_RE = NETRAD - G_PI - H_strg_added
 				 )
 
 
-### LE_VBR LE_RE gap filling
+### VBR-Ts and residual-energy gap filling
 EddyData <- df %>%
 	mutate(Year = year(TIMESTAMP),
 				 DoY = yday(TIMESTAMP),
 				 Hour = hour(TIMESTAMP) + minute(TIMESTAMP)/60,
-				 LE_VBR = LE_VBR,
 				 LE_VBR_Ts = LE_VBR_Ts,
 				 LE_RE= LE_RE,
 				 Rg = SW_IN_PI_F,
@@ -444,7 +428,7 @@ EddyData <- df %>%
 				 VPD = VPD_PI_F,
 				 Ustar = USTAR
 	) %>%
-	select(TIMESTAMP, Year,DoY,Hour,LE_VBR,LE_VBR_Ts,LE_RE,Rg,Tair,rH,VPD,Ustar) %>%
+	select(TIMESTAMP, Year,DoY,Hour,LE_VBR_Ts,LE_RE,Rg,Tair,rH,VPD,Ustar) %>%
 	as.data.frame()
 
 #+++ Add time stamp in POSIX time format
@@ -454,24 +438,21 @@ EddyDataWithPosix <- EddyData %>%
 #+++ with all variables needed for processing later
 pipeline_validate_mds(EddyData$TIMESTAMP)
 EProc <- sEddyProc$new(
-	site_id, EddyDataWithPosix, c('Rg','Tair','VPD', 'Ustar', 'LE_RE','LE_VBR','LE_VBR_Ts'))
+	site_id, EddyDataWithPosix, c('Rg','Tair','VPD', 'Ustar', 'LE_RE','LE_VBR_Ts'))
 
 #++ Fill NEE gaps with MDS gap filling algorithm
-EProc$sMDSGapFill('LE_VBR', FillAll = T)
 EProc$sMDSGapFill('LE_VBR_Ts', FillAll = T)
 EProc$sMDSGapFill('LE_RE', FillAll = T)
-MDSout <- data.frame(TIMESTAMP = EddyData$TIMESTAMP, 
-										 EProc$sExportResults() %>% 
-										   mutate(LE_RE_fall = ifelse(LE_RE_fall_qc == 1, LE_RE_fall, NA),
-										          LE_VBR_fall = ifelse(LE_VBR_fall_qc == 1, LE_VBR_fall, NA),
-										          LE_VBR_Ts_fall = ifelse(LE_VBR_Ts_fall_qc == 1, LE_VBR_Ts_fall, NA),
-										          ) %>%
-										 	select(LE_RE_f,LE_RE_fall, LE_VBR_f, LE_VBR_fall, LE_VBR_Ts_f, LE_VBR_Ts_fall) %>%
-										 	rename(LE_RE_F = LE_RE_f,LE_RE_MDS = LE_RE_fall, 
-										 	       LE_VBR_F = LE_VBR_f,  LE_VBR_MDS = LE_VBR_fall,
-										 	       LE_VBR_Ts_F = LE_VBR_Ts_f,  LE_VBR_Ts_MDS = LE_VBR_Ts_fall
-										 	       )
-)
+# Export every available FillAll prediction and its own quality flag.
+# _fqc describes observed-plus-filled data; _fall_qc describes predictions.
+MDSout <- data.frame(TIMESTAMP = EddyData$TIMESTAMP,
+  EProc$sExportResults() %>%
+    select(LE_RE_f, LE_RE_fqc, LE_RE_fall, LE_RE_fall_qc,
+           LE_VBR_Ts_f, LE_VBR_Ts_fqc, LE_VBR_Ts_fall, LE_VBR_Ts_fall_qc) %>%
+    rename(LE_RE_F = LE_RE_f, LE_RE_F_QC = LE_RE_fqc,
+           LE_RE_MDS = LE_RE_fall, LE_RE_MDS_QC = LE_RE_fall_qc,
+           LE_VBR_Ts_F = LE_VBR_Ts_f, LE_VBR_Ts_F_QC = LE_VBR_Ts_fqc,
+           LE_VBR_Ts_MDS = LE_VBR_Ts_fall, LE_VBR_Ts_MDS_QC = LE_VBR_Ts_fall_qc))
 
 df <- left_join(df, MDSout)
 
@@ -486,8 +467,6 @@ df <- df %>%
 				 ET_710 = LE_710_filtered/lv * 60*30,
 				 ET_710_F = LE_710_PI_F/lv * 60*30,
 				 ET_710_EBC = LE_710_PI_CORR/lv * 60*30,
-				 ET_VBR = LE_VBR/lv * 60*30,
-				 ET_VBR_F = LE_VBR_F/lv * 60*30,
 				 ET_VBR_Ts = LE_VBR_Ts/lv * 60*30,
 				 ET_VBR_Ts_F = LE_VBR_Ts_F/lv * 60*30,
 				 ET_RE = LE_RE/lv * 60*30,
@@ -522,19 +501,21 @@ df_unit_addition <-
 						 LE_710_PI_F = c("[W+1m-2]","derived"), LE_710_MDS = c("[W+1m-2]","derived"), H_710_PI_F = c("[W+1m-2]","derived"),
 						 EBR_d = c("ratio","derived"), LE_PI_CORR = c("[W+1m-2]","derived"),H_PI_CORR = c("[W+1m-2]","derived"),
 						 EBR_d_710 = c("ratio","derived"), LE_710_PI_CORR = c("[W+1m-2]","derived"),H_710_PI_CORR = c("[W+1m-2]","derived"),      
-						 VBR = c("-","derived"),VBR_Ts = c("-","derived"),
-						 LE_VBR = c("[W+1m-2]","derived"),LE_VBR_Ts = c("[W+1m-2]","derived"),
+						 VBR_Ts = c("-","derived"),
+						 LE_VBR_Ts = c("[W+1m-2]","derived"),
 						 LE_RE = c("[W+1m-2]","derived"),
 						 LE_RE_F = c("[W+1m-2]","derived"), LE_RE_MDS = c("[W+1m-2]","derived"),
-						 LE_VBR_F = c("[W+1m-2]","derived"),  LE_VBR_MDS = c("[W+1m-2]","derived"),        
 						 LE_VBR_Ts_F = c("[W+1m-2]","derived"),  LE_VBR_Ts_MDS = c("[W+1m-2]","derived"),
 						 ET_EC = c("mm","derived"),ET_EC_F = c("mm","derived"),ET_EC_EBC = c("mm","derived"),
 						 ET_710 = c("mm","derived"),ET_710_F = c("mm","derived"), ET_710_EBC = c("mm","derived"),
-						 ET_VBR = c("mm","derived"),ET_VBR_F = c("mm","derived"),
 						 ET_VBR_Ts = c("mm","derived"),ET_VBR_Ts_F = c("mm","derived"),
 						 ET_RE = c("mm","derived"),ET_RE_F = c("mm","derived")
 	)
-df_unit_final <- cbind(df_unit,df_unit_addition)
+# Quality codes are dimensionless; keep units aligned with the data columns.
+for (name in pipeline_le_quality_columns()) df_unit_addition[[name]] <- c("1", "quality flag")
+df_unit_final <- cbind(df_unit, df_unit_addition)
+stopifnot(setequal(names(df), names(df_unit_final)))
+df_unit_final <- df_unit_final[, names(df), drop = FALSE]
 
 print(which(colnames(df) != colnames(df_unit_final)))
 

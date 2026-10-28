@@ -68,13 +68,13 @@ pipeline_capture_mds <- function(input, result, mapping) {
 pipeline_publish <- function(staging, output, pattern, window, reprocess) {
   produced <- pipeline_files(staging, pattern)
   if (length(produced) != 1L) stop("Expected one final stage output: ", pattern)
-  fresh <- pipeline_read_table(produced)
+  fresh <- pipeline_output_schema(pipeline_read_table(produced), pattern)
   if (!setequal(window$pending, fresh$data$TIMESTAMP)) stop("Stage output does not match pending timestamps.")
   history <- pipeline_history(output, pattern)
   data <- fresh$data
   if (!is.null(history)) {
     if (!setequal(names(history$data), names(data))) stop("Historical output schema differs: ", pattern)
-    old <- history$data
+    old <- history$data[, names(data), drop = FALSE]
     if (reprocess) old <- old[!old$TIMESTAMP %in% data$TIMESTAMP, ]
     else if (any(data$TIMESTAMP %in% old$TIMESTAMP)) stop("Unexpected overlap during append.")
     data <- dplyr::bind_rows(old, data)

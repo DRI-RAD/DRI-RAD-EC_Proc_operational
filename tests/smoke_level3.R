@@ -36,8 +36,14 @@ ep <- as.data.frame(setNames(lapply(fields, function(x) rep(1, n)), fields), che
 ep$LE <- easy$LE
 ep$H <- easy$H
 ep$co2_flux <- easy$FC
+ep$rand_err_LE <- 2
+ep$rand_err_H <- 3
+ep$rand_err_co2_flux <- 4
+ep$rand_err_Tau <- 5
 ep$date <- format(t, "%Y-%m-%d", tz = "UTC")
 ep$time <- format(t, "%H:%M", tz = "UTC")
+# One interior EasyFlux fallback row must not inherit EddyPro uncertainty.
+ep <- ep[-50, ]
 epdir <- file.path(root, "Columbus", "Aug_2026", "output")
 dir.create(epdir, recursive = TRUE)
 epfile <- file.path(epdir, "eddypro_Columbus_full_output_2026-09-01T120000_adv.csv")
@@ -51,7 +57,11 @@ config <- file.path(root, "config.csv")
 readr::write_csv(cfg, config)
 run_pipeline("ECSM", stages = "L3_EC", config_file = config, base_dir = root)
 result <- pipeline_history(out, pipeline_patterns[["L3_EC"]])$data
-stopifnot(nrow(result) == n, all(result$processing == "EddyPro"),
+stopifnot(nrow(result) == n, all(result$processing[-50] == "EddyPro"),
+          result$processing[50] == "EasyFlux",
+          all(result$LE_rand_err[-50] == 2), all(result$H_rand_err[-50] == 3),
+          all(result$FC_rand_err[-50] == 4), all(result$TAU_rand_err[-50] == 5),
+          all(is.na(result[50, c('LE_rand_err','H_rand_err','FC_rand_err','TAU_rand_err')])),
           all(c("LE_QC_despike", "FC_QC_longrun") %in% names(result)))
 if (length(missing_rows)) {
   for (variable in c("LE", "H", "FC")) {

@@ -9,16 +9,24 @@ An AmeriFlux review export is created automatically after each site's Level 4
 step, including runs with no new L4 observations. It contains the complete saved
 L4 period. `dry_run = TRUE` only previews this step; runs excluding L4 do not
 export. Use `export_ameriflux = FALSE` to disable it explicitly.
-The default review export includes existing EC `LE_PI_F`, `H_PI_F`, and `FC_PI_F`
-(L4 QC, storage fallback and MDS; no EBR correction). These retain local PI names
-and require submission mapping with the AmeriFlux Data Team. Other PI/corrected
-columns are opt-in via `include_pi = TRUE`. Base meteorology
-is from L1 QC before L2 filling. Bulk/tipping-bucket precipitation use
-`P_1_1_1`/`P_1_1_2`; `P_F_1_1_1` is the separate L2 filled precipitation series.
+The default export (`include_pi = TRUE`) includes unfilled observations,
+EC/LI-710 filled and EBR-corrected products, individual soil heat plates,
+unfilled `G_PI`/`SG_PI`, and final filled meteorology. An explicit allowlist
+excludes intermediate calculations, internal QC/method codes, VBR/RE and
+instrument diagnostics. CS65x temperature/conductivity and 05103/LI-710
+meteorology use standard physical quantities with numeric sensor qualifiers.
+EC filled LE/H use `LE_PI_F_1_1_1`/`H_PI_F_1_1_1`; they retain L4 storage and MDS.
+Corrected EC/LI-710 products use `LE_PI_CORR_...`/`H_PI_CORR_...` labels.
+The PI explicitly requests these PI/CORR labels for Data Team review.
+The PI reports Data Team acceptance of these product types with submission comments;
+each export includes `submission_comments.txt` and column-level provenance.
+Base meteorology is from L1 QC before L2 filling. Bulk/tipping-bucket precipitation use
+`P_1_1_1`/`P_1_1_2`; `P_PI_F_1_1_1` is the separate L2 filled precipitation series.
 EC LE/H use `_1_1_1`; LI-710 LE/H use `_1_1_2`, with their L4 MDS-filled results
-separately labeled `LE_F_1_1_2`/`H_F_1_1_2`. Existing EC storage-inclusive PI
-results are not relabeled as turbulent filled fluxes. Scientific calculations
-are unchanged. Confirm sensor indices against the submitted site metadata.
+separately labeled `LE_PI_F_1_1_2`/`H_PI_F_1_1_2`. EC filled products include available
+storage and must not be interpreted as turbulent-only fluxes. Scientific
+calculations are unchanged. Sensor indices describe the confirmed collocated,
+equal-height parallel instruments and should agree with submitted site metadata.
 To export existing Level 4 results independently, use
 `source("run_level5_ameriflux.R")` followed by
 `run_level5_ameriflux(base_dir = data_root)`. All seven sites are selected by
@@ -492,3 +500,38 @@ Level 4 scripts using synthetic data, including MDS and figures.
 
 See `VALIDATION.md` for the validation record. Real-data scientific review is
 still required before routine production use.
+
+## Auxiliary sensor QC retained upstream
+
+L1 screens LI-710 TA/RH/PA before these channels can act as L2 gap-filling
+predictors. Exact repeats lasting **16 consecutive half-hours (8 hours)** are
+removed, with missing values or timestamp gaps breaking a run. Physical ranges
+are -60 to 60 deg C, 0 to 110% RH (the existing L1 RH tolerance), and 50 to 110 kPa.
+Units are checked and converted only for threshold comparisons; saved units and
+accepted values are unchanged. Even a genuine 16-interval pressure/RH plateau
+is flagged under this explicit rule; raw values remain available for review.
+This threshold does not change the existing 8-interval LI-710 **flux** rule or
+the 96-interval long-run rules for other L1 meteorology.
+
+L1 WS_05103_5s_Max and L3 WS_MAX use nonnegative values and the existing mean-wind
+style Q1 - 5*IQR to Q3 + 5*IQR envelope, calculated separately for each channel.
+No MAD despiking or comparison between different anemometers is applied.
+All-missing, fewer-than-four-valid and zero-IQR samples skip the statistical
+envelope. No fixed wind upper bound is invented.
+
+L3 CO2/H2O means and SIGMA (standard deviations, not variances) receive only
+minimal sanity checks: negative, nonfinite and missing-code values are removed.
+There is no arbitrary upper bound, long-run test or statistical despiking for
+these gas quantities. This is not comprehensive analyzer QAQC.
+
+The screened result keeps its original name, with `<variable>_raw` preserving
+the pre-check values and `<variable>_QC_aux` recording the reason (0 retained,
+1 invalid/physical range, 2 repeated run, 4 wind IQR; NA already missing).
+These audit columns and their units propagate to L4 but are excluded from L5's
+allowlist. L5 thus exports the already-screened values without additional QC.
+Reprocess L1 through L4 before regenerating L5. L2 can no longer use rejected
+LI-710 meteorology as donors. H2O/H2O_SIGMA also enter L4 VBR-Ts calculations;
+removing invalid gas values can therefore change VBR and its filled products.
+Historical snapshots acquire missing audit fields on read only (NA, not a pass
+flag); original files are not rewritten. Reprocessing populates these fields.
+Tests: `Rscript tests/test_aux_qc.R`.

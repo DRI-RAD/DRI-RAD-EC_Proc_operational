@@ -5,13 +5,17 @@
 .amf_root <- dirname(normalizePath(.amf_script, winslash = "/", mustWork = TRUE))
 source(file.path(.amf_root, "R", "pipeline_io.R"), encoding = "UTF-8")
 source(file.path(.amf_root, "R", "Level_5_AmeriFlux_export.R"), encoding = "UTF-8")
+source(file.path(.amf_root, "R", "Level_5_AmeriFlux_diagnostics.R"), encoding = "UTF-8")
 
 run_level5_ameriflux <- function(
   sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM", "ESTW"),
   base_dir = "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations",
   config_file = file.path(.amf_root, "meta_files", "file_directions_new.csv"),
   start = NULL, end = NULL, output_dir = NULL, dry_run = FALSE,
-  unit_overrides = character(), extra_mapping = NULL, include_pi = FALSE) {
+  unit_overrides = character(), extra_mapping = NULL, include_pi = TRUE,
+  make_plots = TRUE) {
+  if (!is.logical(make_plots) || length(make_plots) != 1L || is.na(make_plots))
+    stop("make_plots must be TRUE or FALSE.")
   # start/end select inclusive LOCAL-STANDARD interval-end observations.
   # NULL bounds mean all saved Level 4 data, without rereading raw/EddyPro files.
   dirs <- readr::read_csv(config_file, show_col_types = FALSE)
@@ -21,6 +25,7 @@ run_level5_ameriflux <- function(
   if (length(unit_overrides) && (is.null(names(unit_overrides)) || anyDuplicated(names(unit_overrides))))
     stop("unit_overrides must be a named character vector, e.g. c(PA = 'kPa').")
   results <- list()
+  reports <- list()
   for (site in sites) {
     row <- dirs[dirs$site == site, , drop = FALSE]
     site_output <- pipeline_path(base_dir, row$dir_output)
@@ -44,7 +49,17 @@ run_level5_ameriflux <- function(
       write.csv(data.frame(file = normalizePath(files, winslash = "/"), md5 = unname(tools::md5sum(files))),
         file.path(dirname(results[[site]]), "metadata", "source_files.csv"), row.names = FALSE)
       message("Saved: ", results[[site]])
+      if (make_plots) {
+        reports[[site]] <- tryCatch(plot_level5_ameriflux(results[[site]]), error=function(e) {
+          writeLines(conditionMessage(e),file.path(dirname(results[[site]]),'diagnostic_error.txt'))
+          warning(site, ': submission CSV is saved, but diagnostics failed: ', conditionMessage(e),
+                  '. Retry plot_level5_ameriflux() on the saved CSV.',call.=FALSE)
+          NA_character_
+        })
+        message('Diagnostics: ',reports[[site]])
+      }
     }
   }
+  attr(results,'diagnostics') <- reports
   invisible(results)
 }

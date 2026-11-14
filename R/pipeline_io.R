@@ -119,6 +119,23 @@ pipeline_le_quality_columns <- function() {
 
 pipeline_output_schema <- function(item, pattern) {
   item <- pipeline_uncertainty_schema(item, pattern)
+  # Align historical snapshots with auxiliary-QC audit columns without claiming
+  # that old rows passed the new checks. Reprocessing supplies actual raw/flags.
+  aux_l1 <- c("TA_710", "RH_710", "PA_710", "WS_05103_5s_Max")
+  aux_l3 <- c("WS_MAX", "CO2", "H2O", "CO2_SIGMA", "H2O_SIGMA")
+  aux <- switch(tolower(pattern), level_1_qaqced_logger_data = aux_l1,
+    level_3_ec_with_qaqc = aux_l3,
+    level_4_post_processed_data = c(aux_l1, aux_l3), character())
+  for (v in intersect(aux, names(item$data))) {
+    for (suffix in c("_raw", "_QC_aux")) {
+      name <- paste0(v, suffix)
+      if (!name %in% names(item$data)) {
+        item$data[[name]] <- rep(NA_real_, nrow(item$data))
+        item$units[[name]] <- if (suffix == "_raw") item$units[[v]] else
+          c("1", rep("derived", nrow(item$units)-1L))
+      }
+    }
+  }
   if (tolower(pattern) != "level_4_post_processed_data") return(item)
   # Retire only the alternative VBR method. Old source/archive files are not
   # rewritten on read. Never reinterpret alternative-method values as VBR-Ts.

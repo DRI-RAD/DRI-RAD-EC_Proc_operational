@@ -1,6 +1,7 @@
 # Run this stage through run_pipeline.R so period and output state are explicit.
 if (is.null(getOption("ec.pipeline"))) stop("Use run_pipeline() from run_pipeline.R.")
 pipeline_options <- getOption("ec.pipeline")
+source(file.path(.pipeline_root, "R", "pipeline_aux_qc.R"))
 
 ################################################################################
 #### Load library and meta data
@@ -394,9 +395,10 @@ df_orig <- df
 
 # gap stat
 # To do: need to produce each year?
-df_stat <- data.frame(vars = colnames(df)[2:ncol(df)], 
+gap_variables <- setdiff(names(df), "TIMESTAMP")
+df_stat <- data.frame(vars = gap_variables,
 											total = nrow(df),
-											gap = as.numeric(colSums(is.na(df[, 2:ncol(df)]))),
+											gap = as.numeric(colSums(is.na(df[, gap_variables, drop = FALSE]))),
 											gap_after_QC = NA) 
 
 #################################################
@@ -581,6 +583,12 @@ for (v in range_only_vars) {
 }
 
 
+# Auxiliary sensor QC is saved upstream, before L2 uses LI-710 meteorology.
+# Raw inputs and internal flags are retained for traceability.
+aux_qc <- pipeline_aux_qc(df, df_unit, "L1")
+df <- aux_qc$data
+df_unit <- aux_qc$units
+
 ### Additional physical range
 df <- df %>%
 	mutate(PPFD_IN = ifelse(PPFD_IN > 2200, NA, PPFD_IN), 
@@ -764,7 +772,10 @@ df_unit <- df_unit %>%
 #### Stat update and figures
 #################################################
 # gap stat update
-df_stat$gap_after_QC <- as.numeric(colSums(is.na(df[, 2:(ncol(df)-2)])))
+# Match the original variables by name: auxiliary raw/flag columns and derived
+# radiation columns are not additional observations in this before/after table.
+# Explicit selection also fails clearly if an original variable was lost.
+df_stat$gap_after_QC <- as.numeric(colSums(is.na(df[, df_stat$vars, drop = FALSE])))
 write_csv(df_stat,
 						file = paste0(pipeline_path(base_dir, dirs_use$dir_output),"/",site_id,"_Level_1_gap_info.csv")
 						)
@@ -899,7 +910,8 @@ key_vars <- c("SW_IN","SW_OUT","PPFD_IN",
               "G_plate_1_1_5","G_plate_1_1_6",
               "TS_1_1_1","TS_1_1_2","TS_1_1_3",
               "TS_CS65X_1_1_1","TS_CS65X_1_1_2","TS_CS65X_1_1_3",
-              "SWC_1_1_1","SWC_1_1_2","SWC_1_1_3", "WS_05103_mean")
+              "SWC_1_1_1","SWC_1_1_2","SWC_1_1_3", "WS_05103_mean",
+              "WS_05103_5s_Max", "TA_710", "RH_710", "PA_710")
 
 plot_qc_compare_pdf(
 	df_orig = pipeline_figure_data(df_orig),

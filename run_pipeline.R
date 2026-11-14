@@ -35,7 +35,9 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
                          stages = names(pipeline_stages), reference_sites = NULL,
                          context_days = 0, reprocess = FALSE, dry_run = FALSE,
                          min_mds_days = 100, figure_period = "new",
-                         export_ameriflux = TRUE) {
+                         export_ameriflux = TRUE, ameriflux_plots = TRUE) {
+  if (!is.logical(ameriflux_plots) || length(ameriflux_plots) != 1L || is.na(ameriflux_plots))
+    stop("ameriflux_plots must be TRUE or FALSE.")
   if (!is.logical(export_ameriflux) || length(export_ameriflux) != 1L || is.na(export_ameriflux))
     stop("export_ameriflux must be TRUE or FALSE.")
   # start/end are inclusive half-hour observation timestamps, not file dates.
@@ -233,7 +235,7 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
         ameriflux[[site]] <- "planned"
       } else {
         exported <- tryCatch(run_level5_ameriflux(sites = site, base_dir = base_dir,
-          config_file = config_file), error = function(e) {
+          config_file = config_file, make_plots = ameriflux_plots), error = function(e) {
             stop(site, ": Level 4 is saved, but AmeriFlux export failed: ", conditionMessage(e),
                  ". Retry with run_level5_ameriflux() after resolving the export error.", call. = FALSE)
           })

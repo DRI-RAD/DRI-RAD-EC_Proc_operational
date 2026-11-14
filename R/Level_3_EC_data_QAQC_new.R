@@ -1,6 +1,7 @@
 # Run this stage through run_pipeline.R so period and output state are explicit.
 if (is.null(getOption("ec.pipeline"))) stop("Use run_pipeline() from run_pipeline.R.")
 pipeline_options <- getOption("ec.pipeline")
+source(file.path(.pipeline_root, "R", "pipeline_aux_qc.R"))
 
 ################################################################################
 #### Load library and meta data
@@ -791,6 +792,12 @@ EC_unit_final <- cbind(EC_unit,
 											FC_QC_sig_str = c("#","derived"),FC_QC_despike = c("#","derived"),
 											FC_QC_fetch = c("#","derived"), FC_QC_ustar = c("#","derived"), FC_QC_longrun = c("#","derived")
 											))
+
+# Screen auxiliary EC quantities without altering LE/H/FC QC or MDS inputs.
+# Append audit columns after flux flags to preserve data/unit column order.
+aux_qc <- pipeline_aux_qc(EC, EC_unit_final, "L3")
+EC <- aux_qc$data
+EC_unit_final <- aux_qc$units
 
 print(which(colnames(EC) != colnames(EC_unit_final)))
 

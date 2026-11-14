@@ -58,7 +58,7 @@ amf_mapping <- function(columns) {
   add("PA", unit = "kPa")
   add("P_Bulk", "P_1_1_1", "mm", "L1 bulk precipitation (Pluvio or corrected SG400); no L2 gap filling")
   add("P", "P_1_1_2", "mm", "L1 tipping-bucket precipitation; no L2 gap filling")
-  add("P_PI_F", "P_F_1_1_1", "mm", "L2 filled precipitation: selected source, regression filling and final zero fallback; source can be tipping bucket where bulk is unavailable")
+  add("P_PI_F", "P_PI_F_1_1_1", "mm", "L2 filled precipitation: selected source, regression filling and final zero fallback; source can be tipping bucket where bulk is unavailable")
   for (v in c("TA", "RH", "TS", "SWC")) {
     sensors <- grep(paste0("^", v, "(_[1-9][0-9]*_[1-9][0-9]*_[1-9][0-9]*)?$"), columns, value = TRUE)
     for (s in sensors) add(s, unit = if (v %in% c("TA", "TS")) "deg C" else "%")
@@ -74,16 +74,35 @@ amf_mapping <- function(columns) {
   for (v in c("FETCH_90", "FETCH_70")) add(v, unit = "m")
   for (v in c("LE_SSITC_TEST", "H_SSITC_TEST", "FC_SSITC_TEST", "TAU_SSITC_TEST"))
     add(v, target = if (v %in% c("LE_SSITC_TEST", "H_SSITC_TEST")) paste0(v, "_1_1_1") else v, unit = "1")
-  add("G_plate", "G", "W m-2", "Mean soil heat flux at plate depth; soil storage exported separately as SG")
-  add("SG", unit = "W m-2", note = "Soil heat storage above plates; G + SG gives surface calorimetric heat flux")
+  add("SG", "SG_PI", unit = "W m-2", note = "Soil heat storage above plates; G + SG gives surface calorimetric heat flux")
   add("G_PI", "G_PI", "W m-2", "PI calorimetric surface soil heat flux, includes soil storage; do not add SG again")
+  for (s in grep("^G_plate_[0-9]+_[0-9]+_[0-9]+$", columns, value = TRUE))
+    add(s, sub("^G_plate_", "G_", s), "W m-2",
+        "Individual L1 QAQC plate-depth soil heat flux; no above-plate storage addition or MDS filling; indices retained from source sensor")
+  # Explicit instrument mappings: model names belong in metadata, not headers.
+  # Reserve stable replicate slots; never renumber according to missing columns.
+  for (i in 1:3) {
+    add(paste0("TS_CS65X_1_1_", i), paste0("TS_1_1_", i + 3L), "deg C",
+        "L1 QAQC soil temperature from CS65x; original source recorded; no gap filling")
+    add(paste0("cs65x_ec_1_1_", i), paste0("SECA_1_1_", i), "dS m-1",
+        "L1 CS65x bulk soil apparent electrical conductivity; not pore-water conductivity")
+  }
+  add("WS_05103_mean", "WS_1_1_2", "m s-1", "L1 RM Young 05103 mean wind speed; no gap filling")
+  add("WD_05103_mean", "WD_1_1_2", "Decimal degrees", "L1 RM Young 05103 mean wind direction")
+  add("WD_05103_StdDev", "WD_SIGMA_1_1_2", "Decimal degrees", "L1 RM Young 05103 wind-direction standard deviation")
+  add("WS_05103_5s_Max", "WS_MAX_1_1_2", "m s-1", "L1 RM Young 05103 maximum five-second wind speed within averaging interval")
+  add("TA_710", "TA_1_1_4", "deg C", "L1 retained LI-710 air temperature; no gap filling")
+  add("RH_710", "RH_1_1_4", "%", "L1 retained LI-710 relative humidity; no gap filling")
+  add("PA_710", "PA_1_1_2", "kPa", "L1 retained LI-710 pressure; no gap filling")
+  out$target[out$source %in% c("WS", "WD", "WS_MAX", "PA")] <-
+    paste0(out$source[out$source %in% c("WS", "WD", "WS_MAX", "PA")], "_1_1_1")
   # ALB is explicitly calculated as percent in L1.
   out[out$source %in% columns, , drop = FALSE]
 }
 
 amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE, local_standard_time = TRUE,
                         start = NULL, end = NULL, unit_overrides = character(),
-                        extra_mapping = NULL, include_pi = FALSE) {
+                        extra_mapping = NULL, include_pi = TRUE) {
   if (!is.logical(include_pi) || length(include_pi) != 1L || is.na(include_pi))
     stop("include_pi must be TRUE or FALSE.")
   if (!isTRUE(local_standard_time)) stop("Confirm local standard time (no DST) and interval-end timestamps first.")
@@ -148,26 +167,34 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
       note = "LI710 unfilled flux: L3 diag/despike/physical-range/long-run/flow flags applied in L4; no MDS or storage addition"))
     filled <- paste0(v, "_710_PI_F")
     if (filled %in% names(x)) mapping <- rbind(mapping, data.frame(
-      source = filled, target = paste0(v, "_F_1_1_2"), unit = "W m-2",
+      source = filled, target = paste0(v, "_PI_F_1_1_2"), unit = "W m-2",
       note = "LI710 L4 REddyProc MDS-filled series after diagnostic/despike/physical-range/long-run/flow QC; no storage or EBR correction"))
   }
   if (!include_pi) mapping <- mapping[mapping$source != "G_PI", , drop = FALSE]
-  # Always retain existing EC MDS products at the PI's request. They can include
-  # storage; do not rename them as filled turbulent LE/H/FC or add storage again.
+  # Retain existing EC MDS products with explicit storage provenance. Data Team
+  # correspondence permits submission of tower-filled/corrected products with comments.
   # include_pi controls the OTHER local PI products, not these three columns.
   ec_filled <- c("LE_PI_F", "H_PI_F", "FC_PI_F")
-  # Preserve the PI's processed estimates separately in the local review file.
-  # These labels require a later submission mapping; they are not BASE-In labels.
-  pi_sources <- c("LE_PI_F", "H_PI_F", "FC_PI_F", "NETRAD_PI_F", "G_PI_F",
+  # Keep filled and corrected estimates distinct from unfilled turbulent flux.
+  pi_sources <- c("LE_PI_F", "H_PI_F", "FC_PI_F", "NETRAD_PI_F", 
                   "TA_PI_F", "RH_PI_F", "PA_PI_F", "VPD_PI_F", "SW_IN_PI_F", "LW_IN_PI_F", "P_PI_F",
-                  "LE_PI_CORR", "H_PI_CORR")
-  pi_units <- c("W m-2", "W m-2", "umolCO2 m-2 s-1", "W m-2", "W m-2",
-                "deg C", "%", "kPa", "hPa", "W m-2", "W m-2", "mm", "W m-2", "W m-2")
-  for (j in which((include_pi | pi_sources %in% ec_filled) & pi_sources %in% names(x))) mapping <- rbind(mapping,
-    data.frame(source = pi_sources[j], target = pi_sources[j], unit = pi_units[j],
-      note = if (pi_sources[j] %in% c("LE_PI_F", "H_PI_F", "FC_PI_F", "LE_PI_CORR", "H_PI_CORR"))
-        "PI processed result; includes Level 4 storage fallback and gap filling; CORR also includes EBR correction"
-      else "PI processed/gap-filled result; separate from observations"))
+                  "LE_PI_CORR", "H_PI_CORR", "LE_710_PI_CORR", "H_710_PI_CORR")
+  pi_units <- c("W m-2", "W m-2", "umolCO2 m-2 s-1", "W m-2",
+                "deg C", "%", "kPa", "hPa", "W m-2", "W m-2", "mm", "W m-2", "W m-2", "W m-2", "W m-2")
+  pi_targets <- c("LE_PI_F_1_1_1", "H_PI_F_1_1_1", "FC_PI_F", "NETRAD_PI_F",
+                  "TA_PI_F", "RH_PI_F", "PA_PI_F", "VPD_PI_F", "SW_IN_PI_F", "LW_IN_PI_F", "P_PI_F_1_1_1",
+                  "LE_PI_CORR_1_1_1", "H_PI_CORR_1_1_1", "LE_PI_CORR_1_1_2", "H_PI_CORR_1_1_2")
+  # P_PI_F already has an explicit PI-labeled mapping above.
+  pi_sources_keep <- pi_sources != "P_PI_F"
+  for (j in which(pi_sources_keep & (include_pi | pi_sources %in% ec_filled) & pi_sources %in% names(x))) mapping <- rbind(mapping,
+    data.frame(source = pi_sources[j], target = pi_targets[j], unit = pi_units[j],
+      note = if (grepl("710_PI_CORR", pi_sources[j]))
+        "L4 LI710 QAQC + MDS + energy-balance correction; no EC storage added; custom CORR label documented for submission"
+      else if (pi_sources[j] %in% c("LE_PI_F", "H_PI_F", "FC_PI_F", "LE_PI_CORR", "H_PI_CORR"))
+        "L4 EC full QAQC + available storage (turbulent fallback when storage absent) + MDS; CORR additionally applies EBR correction. Do not add storage again. FC_PI_F is storage-inclusive NEE where SC exists"
+      else if (pi_sources[j] == "NETRAD_PI_F")
+        "L4 MDS-filled net radiation; separate from retained NETRAD observations"
+      else "L2 variable-specific filled meteorology; separate from L1 QAQC observations; VPD derives from filled TA/RH"))
   if (include_storage) {
     for (v in intersect(c("SLE", "SH", "SC"), names(x))) {
       mapping <- rbind(mapping, data.frame(source = v, target = if (v %in% c("SLE", "SH")) paste0(v, "_1_1_1") else v,
@@ -180,6 +207,9 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
     if (!all(required %in% names(extra_mapping))) stop("extra_mapping needs source, target, unit, note.")
     mapping <- rbind(mapping[!mapping$target %in% extra_mapping$target, ], extra_mapping[, required])
   }
+  # Allowlist only: no automatic passthrough of intermediate L4 variables.
+  # Internal QC, MDS predictions, VBR/RE, instrument diagnostics and soil-method
+  # components remain in L4 but are not submission columns.
   if (anyDuplicated(mapping$target) || any(mapping$target %in% names(result))) stop("Duplicate export variable.")
   if (any(!grepl("^[A-Z][A-Z0-9_]*$", mapping$target))) stop("Invalid export variable name.")
   for (i in seq_len(nrow(mapping))) {
@@ -216,7 +246,20 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
   }
   used <- unique(c("TIMESTAMP", audit$source))
   for (v in setdiff(names(x), used)) record(v, "", input_unit(v), "", "not_mapped",
-    "Not automatically exported: derived/filled/diagnostic or requires instrument mapping")
+    "Not exported: text provenance, optional product disabled, or requires explicit mapping")
+  audit$source_stage <- vapply(audit$source, function(v) {
+    if (grepl("_MDS|_filtered|_strg_added|_CORR|^ET_|^VBR|^LE_RE|^EBR|^(LE|H|FC).*_PI_F",v)) return("L4")
+    if (grepl("_PI_F|^G_PI$|^G_(plate$|plate_sun|plate_shade|sun|shade|calorimetric|leuning)|^SG",v)) return("L2 (L4 MDS for NETRAD_PI_F/G_PI_F)")
+    if (grepl("_QC_|_SSITC_TEST|^LE$|^H$|^FC$|^TAU|^SLE$|^SH$|^SC$|rand_err|^FETCH|^USTAR|^ZL$|^MO_LENGTH|^T_SONIC|^CO2$|^H2O$|SIGMA|^WS$|^WD$|^WS_MAX$|^(LE|H)_710|^(diag|flow|tilt|data_qc)_710",v)) return("L3; storage additionally screened in L4")
+    "L1; retained through L2-L4"
+  }, character(1))
+  audit$source_scripts <- vapply(seq_len(nrow(audit)), function(i) {
+    stage <- audit$source_stage[i]; src <- audit$source[i]
+    if (stage == "L4") return("R/Level_4_gapfilling_ET_calculation_new.R (retained L1-L3 inputs)")
+    if (startsWith(stage,"L2")) return("R/Level_2_met_PI_vars_new.R; R/Level_4_gapfilling_ET_calculation_new.R for energy-driver MDS")
+    if (startsWith(stage,"L3")) return(if (grepl("710",src)) "R/Level_3_LI710_QAQC_new.R; L4 flag application" else "R/Level_3_EC_data_QAQC_new.R; L4 storage screening; L5 base-flux mask")
+    "R/Level_1_met_QAQC_new.R"
+  }, character(1))
   list(data = result, audit = audit,
        summary = data.frame(variable = names(result)[-(1:2)],
          observations = vapply(result[-(1:2)], function(v) sum(is.finite(v)), integer(1)),
@@ -241,20 +284,20 @@ amf_write <- function(prepared, site, output_dir) {
   dir.create(file.path(staged, "metadata"))
   write.csv(prepared$audit, file.path(staged, "metadata", "variable_mapping.csv"), row.names = FALSE, na = "")
   write.csv(prepared$summary, file.path(staged, "metadata", "coverage.csv"), row.names = FALSE)
-  writeLines(c("LOCAL LEVEL 5 REVIEW FILE - NOT A FINAL AMERIFLUX UPLOAD",
-    "Default: base observations, P_F, LI710 LE_F/H_F, and local EC LE_PI_F/H_PI_F/FC_PI_F.",
-    "Before upload: use the registered CC-xxx ID and BASE-In variable labels.",
-    "TIMESTAMP_START/END: local standard time, no DST; 30-minute intervals.",
-    "EC LE/H: _1_1_1; LI710 LE/H: _1_1_2. Confirm position/height/replicate indices in BADM.",
-    "EC fluxes: despike/physical range and fetch masks only; storage separate.",
-    "LI710 base fluxes: unfilled L4 QC results. LE_F/H_F: existing L4 MDS-filled results.",
-    "P_1_1_1: bulk; P_1_1_2: tipping bucket; P_F_1_1_1: L2 selected/filled precipitation.",
-    "SG is weighted L2 soil storage; derived inputs include interpolation/substitution.",
-    "EC PI_F products retain L4 QC, storage fallback and MDS filling; do not add storage again.",
-    "PI labels are local review names, not accepted upload qualifiers. Other PI/CORR products are opt-in.",
-    "Review metadata/variable_mapping.csv for omitted/unsupported variables.",
-    "Only the data CSV is a data product; metadata files are not upload inputs."),
-    file.path(staged, "README.txt"))
+  comments <- c("AMERIFLUX SUBMISSION COMMENTS",
+    "Curated observations plus explicitly requested tower-team final products; see metadata/variable_mapping.csv for every source and unit.",
+    "PI and CORR labels are deliberately supplied at the PI's request for Data Team review; they do not assert network processing or standard submission qualifier approval.",
+    "TIMESTAMP_START/END: local standard time, no DST; 30-minute intervals. Use registered site ID in final upload filename.",
+    "EC LE/H: _1_1_1; collocated equal-height LI710 LE/H: _1_1_2. Base EC applies despike/physical range and fetch only; no storage addition. Base LI710 uses L4 unfilled QC results.",
+    "LE_PI_F/H_PI_F: existing final MDS-filled series. EC filled products include available storage; LI710 does not. FC_PI_F includes SC where available. Never add storage again.",
+    "LE_PI_CORR/H_PI_CORR: existing filled and energy-balance-corrected series, separately indexed for EC and LI710. CORR denotes tower correction, not ONEFlux processing.",
+    "G_i_j_k: individual plates. G_PI: unfilled selected L2 surface heat flux including soil storage. SG_PI: weighted L2 above-plate storage. Never add SG_PI to G_PI again. No sun/shade or alternative method components exported.",
+    "P_1_1_1: bulk; P_1_1_2: tipping bucket; P_PI_F_1_1_1: L2 selected and filled precipitation, including zero fallback.",
+    "Meteorological observations precede filling; *_PI_F are final filled products. NETRAD_PI_F includes L4 MDS filling.",
+    "CS65x temperature uses TS_1_1_4 through TS_1_1_6; conductivity uses SECA_1_1_1 through SECA_1_1_3. LI710 TA/RH use replicate 4 and PA replicate 2. 05103 wind uses replicate 2. Confirm positional indices against site sensor metadata.",
+    "Instrument source names are recorded in metadata, not used as export variable base names. No internal QC/method codes, raw LI710 flux duplicates, MDS predictions, storage-added intermediates, VBR/RE or signal-strength columns are exported.")
+  writeLines(comments, file.path(staged, "README.txt"))
+  writeLines(comments, file.path(staged, "submission_comments.txt"))
   # Round-trip verify timestamps, sentinel formatting, and a single header row.
   check <- read.csv(file, colClasses = "character", check.names = FALSE)
   if (!identical(names(check), names(d)) || nrow(check) != nrow(d) ||

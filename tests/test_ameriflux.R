@@ -43,33 +43,33 @@ x <- p$data
 stopifnot(nrow(x)==4, x$TIMESTAMP_START[2]=='202402282330', x$TIMESTAMP_END[3]=='202402290030',
   x$LE_1_1_1[1]==100, x$H_1_1_1[1]==10, x$FC[1]==-1, x$LE_SSITC_TEST_1_1_1[1]==2,
   all(is.na(x$LE_1_1_1[2:4])), x$SLE_1_1_1[1]==5,
-  x$G[1]==10,x$SG[1]==3,
-  x$PA[1]==90,abs(x$TA_1_1_3[1]-6.85)<1e-9,
+  x$SG_PI[1]==3,
+  x$PA_1_1_1[1]==90,abs(x$TA_1_1_3[1]-6.85)<1e-9,
   x$RH_1_1_3[1]==20,x$SWC_1_1_1[1]==10,x$ALB[1]==20,
   abs(x$T_SONIC[1]-26.85)<1e-9,x$T_SONIC[2]==25,x$T_SONIC_SIGMA[1]==2,
   !'TS_1_1_1'%in%names(x),
-  setequal(grep('_PI', names(x), value=TRUE), c('LE_PI_F','H_PI_F','FC_PI_F')),
-  x$LE_PI_F[2]==220, x$H_PI_F[2]==40, x$FC_PI_F[2]==5,
-  is.na(x$LE_PI_F[3]), !any(c('LE','H') %in% names(x)),
+  all(c('G_PI','SG_PI','LE_PI_F_1_1_1','LE_PI_F_1_1_2') %in% names(x)),
+  x$LE_PI_F_1_1_1[2]==220, x$H_PI_F_1_1_1[2]==40, x$FC_PI_F[2]==5,
+  is.na(x$LE_PI_F_1_1_1[3]), !any(c('LE','H') %in% names(x)),
   x$LE_1_1_2[1]==90, x$H_1_1_2[4]==27,
-  x$LE_F_1_1_2[2]==180, x$H_F_1_1_2[2]==18,
+  x$LE_PI_F_1_1_2[2]==180, x$H_PI_F_1_1_2[2]==18,
   x$P_1_1_1[1]==2, x$P_1_1_2[1]==1, is.na(x$P_1_1_1[2]),
-  is.na(x$P_1_1_2[2]), x$P_F_1_1_1[2]==0,
-  !'P' %in% names(x), !'FC_F_1_1_1' %in% names(x), !'LE_F_1_1_1' %in% names(x),
+  is.na(x$P_1_1_2[2]), x$P_PI_F_1_1_1[2]==0,
+  !'P' %in% names(x), 'FC_PI_F' %in% names(x), 'LE_PI_F_1_1_1' %in% names(x),
   is.na(x$LE_1_1_2[2]), is.na(x$SW_IN[2]),
   any(p$audit$source=='TS_1_1_1' & p$audit$status=='omitted'))
 review <- amf_prepare(item, include_pi=TRUE)$data
-stopifnot(review$LE_PI_F[2]==220, review$G_PI[1]==13, review$VPD_PI_F[1]==10)
+stopifnot(review$LE_PI_F_1_1_1[2]==220, review$G_PI[1]==13, review$VPD_PI_F[1]==10)
 stopifnot(!anyDuplicated(names(review)),
-  identical(amf_prepare(item, include_storage=FALSE)$data$LE_PI_F, x$LE_PI_F))
+  identical(amf_prepare(item, include_storage=FALSE)$data$LE_PI_F_1_1_1, x$LE_PI_F_1_1_1))
 no_ec_filled <- item
 no_ec_filled$data[c('LE_PI_F','H_PI_F','FC_PI_F')] <- NULL
-stopifnot(!any(c('LE_PI_F','H_PI_F','FC_PI_F') %in% names(amf_prepare(no_ec_filled)$data)))
+stopifnot(!any(c('LE_PI_F_1_1_1','H_PI_F_1_1_1','FC_PI_F') %in% names(amf_prepare(no_ec_filled)$data)))
 absent <- item
 absent$data$LE_710_filtered <- absent$data$H_710_filtered <- NULL
 stopifnot(!any(c('LE_1_1_2','H_1_1_2') %in% names(amf_prepare(absent)$data)))
 absent$data$LE_710_PI_F <- absent$data$H_710_PI_F <- absent$data$P_Bulk <- NULL
-stopifnot(!any(c('LE_F_1_1_2','H_F_1_1_2','P_1_1_1') %in% names(amf_prepare(absent)$data)),
+stopifnot(!any(c('LE_PI_F_1_1_2','H_PI_F_1_1_2','P_1_1_1') %in% names(amf_prepare(absent)$data)),
           'P_1_1_2' %in% names(amf_prepare(absent)$data))
 fail(amf_prepare(item, include_pi=NA))
 p2 <- amf_prepare(item, unit_overrides=c(TS_1_1_1='deg C'))
@@ -124,3 +124,33 @@ stopifnot(count_exports()==before+2, file.exists(attr(again,'ameriflux')$ECSM))
 fail(do.call(run_pipeline, c(args,list(export_ameriflux=NA))))
 unlink(dir,recursive=TRUE)
 cat('PASS: requested flux masks, separate storage/PI products, unit provenance, missing intervals/leap day, errors, CSV writing, runner and immutable inputs.\n')
+
+# Curated export: retain approved sensor quantities and final products only.
+extended <- item
+new_fields <- c('G_plate_1_1_1','G_plate_1_1_2','G_plate_sun','SG_sun',
+ 'G_calorimetric','G_leuning','LE_PI_CORR','H_PI_CORR','LE_710_PI_CORR',
+ 'H_710_PI_CORR','LE_VBR_Ts','LE_MDS','LE_rand_err','diag_710',
+ 'TA_PI_F_method','LE_710','LE_strg_added','LE_710_QC_longrun')
+for (v in new_fields) { extended$data[[v]] <- c(11,22,33); extended$units[[v]] <- 'W m-2' }
+for(v in c('TS_CS65X_1_1_1','TS_CS65X_1_1_2','TS_CS65X_1_1_3','TA_710')) {
+ extended$data[[v]]<-c(1,2,3); extended$units[[v]]<-'deg C'
+}
+extended$data$cs65x_ec_1_1_1<-1; extended$units$cs65x_ec_1_1_1<-'dS m-1'
+extended$data$WS_05103_mean<-2; extended$units$WS_05103_mean<-'m/s'
+extended$data$RH_710<-55; extended$units$RH_710<-'%'
+ep <- amf_prepare(extended)
+stopifnot(ep$data$G_1_1_1[1]==11, ep$data$G_1_1_2[2]==22,
+ ep$data$G_PI[1]==13,ep$data$SG_PI[1]==3,
+ ep$data$LE_PI_CORR_1_1_1[2]==22,ep$data$LE_PI_CORR_1_1_2[2]==22,
+ ep$data$H_PI_CORR_1_1_1[2]==22,ep$data$H_PI_CORR_1_1_2[2]==22,
+ ep$data$TS_1_1_4[1]==1,ep$data$TS_1_1_6[2]==2,
+ ep$data$SECA_1_1_1[1]==1,ep$data$WS_1_1_2[1]==2,
+ ep$data$TA_1_1_4[1]==1,ep$data$RH_1_1_4[1]==55,
+ !any(grepl('VBR|METHOD|LEUNING|CALORIMETRIC|SUN|SHADE|DESPIKE|MDS|^DIAG|^LE_710$|STRG|CS65|05103',names(ep$data))),
+ !any(c('G','G_F','G_PI_F','SG') %in% names(ep$data)),
+ !anyDuplicated(names(ep$data)),all(is.na(ep$data[3,-(1:2)])))
+minimal<-amf_prepare(extended,include_pi=FALSE)$data
+stopifnot(!'LE_PI_CORR_1_1_1' %in% names(minimal))
+collision<-extended;collision$data$TS_1_1_4<-1;collision$units$TS_1_1_4<-'deg C'
+fail(amf_prepare(collision))
+cat('PASS: allowlist excludes intermediates; fixed sensor suffixes, PI labels, final products and collision protection.\n')

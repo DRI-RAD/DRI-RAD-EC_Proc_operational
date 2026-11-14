@@ -535,3 +535,18 @@ removing invalid gas values can therefore change VBR and its filled products.
 Historical snapshots acquire missing audit fields on read only (NA, not a pass
 flag); original files are not rewritten. Reprocessing populates these fields.
 Tests: `Rscript tests/test_aux_qc.R`.
+
+### Historical LI-710 meteorology
+
+L1 TA_710/RH_710/PA_710 now uses the same site-specific source discovery as L3:
+configured `dir_LI710` and `dir_LI710_old`, plus matching `.dat` and `.backup`
+files in their folders (and the logger folder). Discovery is nonrecursive.
+An active file is not required. Older backups are read first; the active `.dat`
+wins duplicate sample timestamps. Exact samples are deduplicated before the
+existing floor-to-half-hour averaging and logger-clock left join. No values are
+extrapolated beyond source coverage. Missing met channels in a historical file
+produce NA with a warning. Pressure, temperature and RH units are normalized
+per input file to kPa, deg C and percent before merging; unknown units stop the
+read rather than silently combining incompatible values. L1 QC then applies.
+Reprocess L1 onward to recover the historical meteorology and its downstream
+gap-filling effects. Flux reading remains unchanged.

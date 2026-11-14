@@ -93,54 +93,22 @@ if(site_id =="EDVG"){
 ################################################################################
 #### Load LI710 (if available) - merge met variable only 
 ################################################################################
-if(!is.na(dirs_use$dir_LI710)){
-  
-  if(!is.na(dirs_use$dir_LI710_old)){ 
-    ### Load LI710 old data
-    LI710_unit_old <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710_old),skip = 1, n_max = 2)
-    LI710_old <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710_old),skip = 4, col_names = F)
-    colnames(LI710_old) <- colnames(LI710_unit_old)
-    # Restrict input to the requested calculation window before processing.
-    LI710_old <- pipeline_slice(LI710_old)
-    
-    ### Load LI710 data
-    LI710_unit <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 1, n_max = 2)
-    LI710 <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 4, col_names = F)
-    colnames(LI710) <- colnames(LI710_unit)
-    # Restrict input to the requested calculation window before processing.
-    LI710 <- pipeline_slice(LI710)
-    
-    LI710 <- full_join(LI710_old, LI710)
-    LI710_unit <- full_join(LI710_unit_old, LI710_unit)
-    
-  } else{
-    ### Load LI710 data
-    LI710_unit <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 1, n_max = 2)
-    LI710 <- read_delim(pipeline_path(base_dir, dirs_use$dir_LI710),skip = 4, col_names = F)
-    colnames(LI710) <- colnames(LI710_unit)  
-    # Restrict input to the requested calculation window before processing.
-    LI710 <- pipeline_slice(LI710)
-    
-    }
-  
-  # Full time sequence for 30 min
-	LI710 <- LI710 %>%
-		select(c('TIMESTAMP','Atm_press','AirTC','RH_710')) %>%
-		distinct(TIMESTAMP, .keep_all = TRUE) %>% 
-		mutate(TIMESTAMP_30 = floor_date(TIMESTAMP, "30 minutes")) %>%
-		group_by(TIMESTAMP_30) %>%
-		summarise(across(where(is.numeric), ~mean(.x, na.rm = TRUE)),
-							.groups = "drop") %>%
-		rename(TIMESTAMP = TIMESTAMP_30)
-	
-	LI710_unit <- LI710_unit %>% select(c('TIMESTAMP','Atm_press','AirTC','RH_710'))
-	
-	colnames(LI710) <- c('TIMESTAMP','PA_710','TA_710','RH_710')
-	colnames(LI710_unit) <- c('TIMESTAMP','PA_710','TA_710','RH_710')
-	
-	# left join to HH data
-	df <- left_join(df, LI710)
-	df_unit <- left_join(df_unit, LI710_unit)
+# Use the same site-specific .dat/old/backup discovery and overlap precedence
+# as L3 flux processing. Old-only streams are valid; no active file is required.
+li710_met_files <- pipeline_li710_files(dirs_use, base_dir)
+if (length(li710_met_files)) {
+  li710_met_input <- pipeline_li710_read(li710_met_files,
+    window = pipeline_options$window, met = TRUE)
+  LI710 <- li710_met_input$data %>%
+    mutate(TIMESTAMP = floor_date(TIMESTAMP, "30 minutes")) %>%
+    group_by(TIMESTAMP) %>%
+    summarise(across(where(is.numeric),
+      ~ if (all(is.na(.x))) NA_real_ else mean(.x, na.rm = TRUE)), .groups = "drop")
+  names(LI710) <- c("TIMESTAMP", "PA_710", "TA_710", "RH_710")
+  df <- left_join(df, LI710, by = "TIMESTAMP")
+  # Metadata has unit and aggregation rows; align by row, not by timestamp text.
+  for (pair in list(c("Atm_press", "PA_710"), c("AirTC", "TA_710"), c("RH_710", "RH_710")))
+    df_unit[[pair[2]]] <- li710_met_input$units[[pair[1]]]
 }
 
 ################################################################################

@@ -22,15 +22,20 @@ pipeline_li710_files <- function(row, base_dir) {
   files[order(active, file.info(files)$mtime, files)]
 }
 
-pipeline_li710_read <- function(files, window = NULL) {
-  fields <- c("TIMESTAMP", "LE_710", "H_710", "diag", "flow", "tilt", "data_qc")
+pipeline_li710_read <- function(files, window = NULL, met = FALSE) {
+  fields <- if (met) c("TIMESTAMP", "Atm_press", "AirTC", "RH_710") else
+    c("TIMESTAMP", "LE_710", "H_710", "diag", "flow", "tilt", "data_qc")
   empty <- as.data.frame(setNames(lapply(fields, function(n) if (n == "TIMESTAMP")
     as.POSIXct(character(), tz = "UTC") else numeric()), fields))
   data <- empty
   units <- as.data.frame(setNames(lapply(fields, function(n) c(if (n == "TIMESTAMP") "TS" else "unit", "avg")), fields))
+  if (met) {
+    units$Atm_press <- c("kPa", "avg"); units$AirTC <- c("deg C", "avg")
+    units$RH_710 <- c("%", "avg")
+  }
   for (file in files) {
     metadata <- readr::read_csv(file, skip = 1, n_max = 2, col_types = readr::cols(.default = "c"))
-    required <- setdiff(fields, "data_qc")
+    required <- if (met) "TIMESTAMP" else setdiff(fields, "data_qc")
     if (!all(required %in% names(metadata))) stop("Missing LI710 fields in ", file, ": ", paste(setdiff(required, names(metadata)), collapse = ", "))
     item <- readr::read_csv(file, skip = 4, col_names = names(metadata),
       col_types = readr::cols(.default = "c"), na = c("", "NA", "NaN", "-9999", "9999999"))
@@ -39,15 +44,38 @@ pipeline_li710_read <- function(files, window = NULL) {
       # Include samples that round down to the requested last half-hour.
       item <- item[item$TIMESTAMP >= window$read_start & item$TIMESTAMP < window$end + 1800, ]
     }
-    if (!"data_qc" %in% names(item)) { item$data_qc <- rep("0", nrow(item)); metadata$data_qc <- NA_character_ }
+    if (met) {
+      # Some historical streams have no meteorological channels. Keep those
+      # values missing; never substitute flux/diagnostic fields for meteorology.
+      missing <- setdiff(fields, names(item))
+      if (length(missing) && nrow(item)) warning("Missing LI710 meteorology in ", file,
+        ": ", paste(missing, collapse = ", "), "; retained as NA.", call. = FALSE)
+      for (name in missing) { item[[name]] <- rep(NA_character_, nrow(item)); metadata[[name]] <- NA_character_ }
+    } else if (!"data_qc" %in% names(item)) { item$data_qc <- rep("0", nrow(item)); metadata$data_qc <- NA_character_ }
     item <- item[, fields]
     for (name in setdiff(fields, "TIMESTAMP")) {
       converted <- suppressWarnings(as.numeric(item[[name]]))
       if (any(!is.na(item[[name]]) & is.na(converted))) stop("Non-numeric LI710 field ", name, " in ", file)
       item[[name]] <- converted
+      if (met && any(!is.na(converted))) {
+        # Normalize per file BEFORE combining old and current streams. Do not
+        # interpret old observations using whichever unit header was read last.
+        u <- tolower(gsub("[[:space:]]", "", as.character(metadata[[name]][1])))
+        if (name == "Atm_press") {
+          factors <- c(kpa=1, pa=.001, hpa=.1, mbar=.1)
+          if (is.na(u) || !u %in% names(factors)) stop("Unknown LI710 pressure unit in ", file, ": ", u)
+          item[[name]] <- converted * factors[[u]]
+        } else if (name == "AirTC") {
+          if (is.na(u) || !u %in% c("degc", "c", "k", "kelvin")) stop("Unknown LI710 temperature unit in ", file, ": ", u)
+          if (u %in% c("k", "kelvin")) item[[name]] <- converted - 273.15
+        } else if (name == "RH_710") {
+          if (is.na(u) || !u %in% c("%", "percent", "fraction")) stop("Unknown LI710 humidity unit in ", file, ": ", u)
+          if (u == "fraction") item[[name]] <- converted * 100
+        }
+      }
     }
     data <- dplyr::bind_rows(data, item)
-    units <- metadata[, fields]
+    if (!met) units <- metadata[, fields]
   }
   # Deduplicate exact sample clocks before averaging to the half-hour grid.
   data <- data[!duplicated(data$TIMESTAMP, fromLast = TRUE), ]

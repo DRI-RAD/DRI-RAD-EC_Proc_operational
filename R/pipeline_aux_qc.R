@@ -1,11 +1,24 @@
 # Upstream QC for auxiliary sensors. Preserve input values and internal reason
 # flags in L1/L3/L4; L5 exports only the screened standard quantity.
-# Flags are additive bits: 1 invalid/range, 2 constant run, 4 wind 5-IQR.
+# Flags are additive bits: 1 invalid/range, 2 constant run, 4 IQR range.
 # NA flag means the input was already missing. No interpolation is performed.
-pipeline_aux_qc <- function(data, units, stage = c("L1", "L3")) {
+pipeline_precip_range <- function(x) {
+  x[!is.finite(x) | x < 0 | x > 500] <- NA_real_
+  x
+}
+
+pipeline_fetch_export_flag <- function(x) {
+  if (any(!is.na(x) & !x %in% c(0, 1, 2))) stop("Unexpected internal fetch flag.")
+  # openeddy returns 0=inside and 2=outside; internal filtering rejects >=1.
+  ifelse(is.na(x), NA_real_, as.numeric(x == 0))
+}
+
+pipeline_aux_qc <- function(data, units, stage = c("L1", "L3"), gas_iqr_k = 10) {
   stage <- match.arg(stage)
+  if (length(gas_iqr_k) != 1L || !is.numeric(gas_iqr_k) || !is.finite(gas_iqr_k) || gas_iqr_k <= 0)
+    stop("gas_iqr_k must be one positive finite number.")
   key <- function(u) gsub("[[:space:]\\[\\]\\^*+]", "", tolower(u), perl = TRUE)
-  screen <- function(v, bounds = NULL, scale = 1, offset = 0, run = NULL, wind = FALSE) {
+  screen <- function(v, bounds = NULL, scale = 1, offset = 0, run = NULL, wind = FALSE, iqr_k = NULL) {
     if (!v %in% names(data)) return(invisible(NULL))
     if (!v %in% names(units)) stop("Missing auxiliary QC unit: ", v)
     raw <- data[[v]]
@@ -26,14 +39,15 @@ pipeline_aux_qc <- function(data, units, stage = c("L1", "L3")) {
       reject <- !is.na(y) & n >= run
       flags[reject] <- flags[reject] + 2L; y[reject] <- NA_real_
     }
-    if (wind) {
+    if (wind || !is.null(iqr_k)) {
+      k <- if (wind) 5 else iqr_k
       z <- y[is.finite(y)]
       # Match L1's WS_05103_mean Q1-5*IQR / Q3+5*IQR envelope.
       # A zero-IQR or tiny sample cannot define a useful outlier envelope.
       if (length(z) >= 4L) {
         q <- as.numeric(quantile(z, c(.25, .75))); spread <- q[2] - q[1]
         if (spread > 0) {
-          reject <- !is.na(y) & (y < q[1] - 5 * spread | y > q[2] + 5 * spread)
+          reject <- !is.na(y) & (y < q[1] - k * spread | y > q[2] + k * spread)
           flags[reject] <- flags[reject] + 4L; y[reject] <- NA_real_
         }
       }
@@ -46,6 +60,12 @@ pipeline_aux_qc <- function(data, units, stage = c("L1", "L3")) {
     units[[paste0(v, "_QC_aux")]] <<- c("1", rep("derived", nrow(units)-1L))
   }
   if (stage == "L1") {
+    # Screen both observed precipitation streams before L2 trains/fills from them.
+    for (v in intersect(c("P", "P_Bulk"), names(data))) {
+      if (!key(as.character(units[[v]][1])) %in% c("mm", "mm/30min"))
+        stop("Expected half-hour precipitation in mm for ", v)
+      screen(v, c(0, 500))
+    }
     for (v in intersect(c("TA_710", "RH_710", "PA_710"), names(data))) {
       u <- key(as.character(units[[v]][1]))
       if (v == "TA_710") {
@@ -64,9 +84,10 @@ pipeline_aux_qc <- function(data, units, stage = c("L1", "L3")) {
     screen("WS_05103_5s_Max", c(0, Inf), wind = TRUE)
   } else {
     screen("WS_MAX", c(0, Inf), wind = TRUE)
-    # Minimal sanity checks only. No statistical/upper-range/long-run or flux
-    # flags applied to gas means or standard deviations; preserve real extremes.
-    for (v in c("CO2", "H2O", "CO2_SIGMA", "H2O_SIGMA")) screen(v, c(0, Inf))
+    # Range-only Q1-k*IQR / Q3+k*IQR screening, equivalent to the requested
+    # c=Inf despike range check without running its MAD/day-night machinery.
+    # No flux flags or long-run filtering are applied to these gas quantities.
+    for (v in c("CO2", "H2O", "CO2_SIGMA", "H2O_SIGMA")) screen(v, c(0, Inf), iqr_k = gas_iqr_k)
   }
   list(data = data, units = units)
 }

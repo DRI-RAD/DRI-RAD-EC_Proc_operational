@@ -35,7 +35,9 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
                          stages = names(pipeline_stages), reference_sites = NULL,
                          context_days = 0, reprocess = FALSE, dry_run = FALSE,
                          min_mds_days = 100, figure_period = "new",
-                         export_ameriflux = TRUE, ameriflux_plots = TRUE) {
+                         export_ameriflux = TRUE, ameriflux_plots = TRUE,
+                         output_dir = NULL) {
+  output_dir <- pipeline_output_root(output_dir)
   if (!is.logical(ameriflux_plots) || length(ameriflux_plots) != 1L || is.na(ameriflux_plots))
     stop("ameriflux_plots must be TRUE or FALSE.")
   if (!is.logical(export_ameriflux) || length(export_ameriflux) != 1L || is.na(export_ameriflux))
@@ -79,6 +81,13 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
   if (is.null(reference_sites)) reference_sites <- if ("L2" %in% stages) supported else sites
   reference_sites <- unique(c(sites, reference_sites))
   if (any(!reference_sites %in% supported) || any(!reference_sites %in% dirs$site)) stop("Unknown reference site.")
+  # Override only target sites. Non-target L2 donor sites continue to use their
+  # configured existing L1 data; neither their output locations nor raw inputs change.
+  if (!is.null(output_dir)) {
+    target_rows <- match(sites, dirs$site)
+    dirs$dir_output[target_rows] <- file.path(output_dir, sites)
+    message("Output root: ", output_dir, " (one subfolder per target site)")
+  }
   oldwd <- getwd()
   oldopt <- options(ec.pipeline = NULL)
   on.exit({ setwd(oldwd); options(oldopt) }, add = TRUE)
@@ -213,7 +222,17 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
                     "Merged upstream input for the current calculation window.")
               }
             }
-            options(ec.pipeline = list(dirs = stage_dirs, base_dir = base_dir,
+            # Supply prior screened radiation to the PPFD-only check without
+            # expanding other L1 algorithms' calculation windows.
+            ppfd_context <- NULL
+            if (stage == "L1") {
+              saved <- history_for(site, "L1")
+              if (!is.null(saved) && all(c("SW_IN", "PPFD_IN") %in% names(saved$data))) {
+                keep <- saved$data$TIMESTAMP < window$read_start & saved$data$TIMESTAMP >= window$read_start-14*86400
+                ppfd_context <- saved$data[keep,intersect(c("TIMESTAMP","SW_IN","PPFD_IN","PPFD_IN_pre_shadow"),names(saved$data)),drop=FALSE]
+              }
+            }
+            options(ec.pipeline = list(dirs = stage_dirs, base_dir = base_dir, ppfd_context = ppfd_context,
                 sites = site, reference_sites = refs, window = window, eddypro = eddy[[site]],
                 li710 = li710[[site]], min_mds_days = min_mds_days, figure_period = figure_period,
                 automatic_end = automatic_end,
@@ -235,7 +254,8 @@ run_pipeline <- function(sites = c("ECDP", "EDVG", "EDVP", "ERVA", "ERVP", "ECSM
         ameriflux[[site]] <- "planned"
       } else {
         exported <- tryCatch(run_level5_ameriflux(sites = site, base_dir = base_dir,
-          config_file = config_file, make_plots = ameriflux_plots), error = function(e) {
+          config_file = config_file, make_plots = ameriflux_plots,
+          processed_dir = output_dir), error = function(e) {
             stop(site, ": Level 4 is saved, but AmeriFlux export failed: ", conditionMessage(e),
                  ". Retry with run_level5_ameriflux() after resolving the export error.", call. = FALSE)
           })

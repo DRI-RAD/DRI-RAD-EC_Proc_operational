@@ -2,6 +2,7 @@
 if (is.null(getOption("ec.pipeline"))) stop("Use run_pipeline() from run_pipeline.R.")
 pipeline_options <- getOption("ec.pipeline")
 source(file.path(.pipeline_root, "R", "pipeline_aux_qc.R"))
+source(file.path(.pipeline_root, "R", "pipeline_ppfd_shadow.R"))
 
 ################################################################################
 #### Load library and meta data
@@ -739,6 +740,21 @@ df_unit <- df_unit %>%
 #################################################
 #### Stat update and figures
 #################################################
+# Repeated PPFD deficits relative to independent SW_IN, after ordinary L1 QC.
+# Default: >=20% AND >=80 W/m2 deficit at SW>=100, same half-hour for >=5 days.
+ppfd_shadow <- pipeline_ppfd_shadow(df, context = pipeline_options$ppfd_context)
+df <- ppfd_shadow$data
+df_unit$PPFD_IN_pre_shadow <- df_unit$PPFD_IN
+df_unit$PPFD_IN_SW_scaled <- c("W m-2", "derived")
+df_unit$PPFD_IN_QC_shadow <- c("1", "derived")
+message("PPFD shadow QC: ", ppfd_shadow$status, "; slope=", signif(ppfd_shadow$slope,5),
+        "; fit pairs=", ppfd_shadow$fit_pairs, "; removed=", sum(ppfd_shadow$removed))
+shadow_options <- getOption("ec.pipeline")
+shadow_options$diagnostics <- c(shadow_options$diagnostics,
+  list(ppfd_shadow_slope=ppfd_shadow$slope, ppfd_shadow_fit_pairs=ppfd_shadow$fit_pairs,
+       ppfd_shadow_removed=sum(pipeline_figure_data(df)$PPFD_IN_QC_shadow==1,na.rm=TRUE)))
+options(ec.pipeline=shadow_options)
+
 # gap stat update
 # Match the original variables by name: auxiliary raw/flag columns and derived
 # radiation columns are not additional observations in this before/after table.
@@ -758,7 +774,7 @@ plot_qc_compare_pdf <- function(df_orig, df, vars,
 																chunk_size = 48 * 183,
 																n_panel_per_page = 3,
 																max_n_per_panel = 3000,
-																clear_sky_comparison=FALSE) {
+																clear_sky_comparison=FALSE, ppfd_slope=NA_real_) {
 	
 	stopifnot("TIMESTAMP" %in% names(df_orig), "TIMESTAMP" %in% names(df))
 	
@@ -782,7 +798,7 @@ plot_qc_compare_pdf <- function(df_orig, df, vars,
 	
 	if (clear_sky_comparison) {
 	  dat_all <- dat_all %>%
-	    left_join(df %>% select(TIMESTAMP,ClearSkyRad))
+	    left_join(df %>% select(TIMESTAMP, ClearSkyRad, PPFD_IN_SW_scaled, PPFD_IN_QC_shadow), by = "TIMESTAMP")
 	}
 	
 	
@@ -806,7 +822,9 @@ plot_qc_compare_pdf <- function(df_orig, df, vars,
 			#--------------------------------------------
 			if (nrow(dat_sub) > max_n_per_panel) {
 				step_n <- ceiling(nrow(dat_sub) / max_n_per_panel)
-				dat_sub <- dat_sub[seq(1, nrow(dat_sub), by = step_n), ]
+				keep_rows <- seq(1, nrow(dat_sub), by = step_n)
+                if (clear_sky_comparison) keep_rows <- sort(unique(c(keep_rows, which(dat_sub$PPFD_IN_QC_shadow == 1))))
+                dat_sub <- dat_sub[keep_rows, ]
 			}
 			
 			p <- ggplot(dat_sub, aes(x = TIMESTAMP)) +
@@ -814,8 +832,18 @@ plot_qc_compare_pdf <- function(df_orig, df, vars,
 				geom_line(aes(y = .data[[v_qc]]),   color = "black", na.rm = TRUE, linewidth = 0.3)
 			
 			if (clear_sky_comparison) {
-				p <- p +
-					geom_line(aes( y = ClearSkyRad), color = "orange",na.rm = TRUE, linewidth = 0.25)
+                p <- ggplot(dat_sub, aes(x=TIMESTAMP)) +
+                  geom_line(aes(y=.data[[v_orig]], colour="SW_IN before QC"), na.rm=TRUE, linewidth=.25) +
+                  geom_line(aes(y=.data[[v_qc]], colour="SW_IN reference"), na.rm=TRUE, linewidth=.3) +
+                  geom_line(aes(y=ClearSkyRad, colour="Clear sky"), na.rm=TRUE, linewidth=.25) +
+                  geom_line(aes(y=PPFD_IN_SW_scaled, colour="PPFD scaled to SW"), na.rm=TRUE, linewidth=.3) +
+                  geom_point(data=dat_sub[which(dat_sub$PPFD_IN_QC_shadow==1),],
+                    aes(y=PPFD_IN_SW_scaled, colour="PPFD shadow removed"), size=1.2, na.rm=TRUE) +
+                  scale_colour_manual(values=c("SW_IN before QC"="grey65", "SW_IN reference"="black",
+                    "Clear sky"="orange", "PPFD scaled to SW"="#0072B2", "PPFD shadow removed"="#CC0077"),drop=FALSE) +
+                  labs(colour=NULL,caption=paste0("SW-equivalent PPFD = ",signif(ppfd_slope,4),
+                    " x PPFD.\nRemoved: >=20% and >=80 W/m2 deficit at SW>=100, same clock >=5 consecutive days.")) +
+                  guides(colour=guide_legend(nrow=2,byrow=TRUE))
 			}
 			
 			p <- p +
@@ -827,10 +855,13 @@ plot_qc_compare_pdf <- function(df_orig, df, vars,
 						format(max(dat_sub$TIMESTAMP, na.rm = TRUE), "%Y-%m-%d %H:%M")
 					),
 					x = NULL,
-					y = v
+					y = if (clear_sky_comparison) "W m-2" else v
 				) +
 				theme_bw() +
 				theme(
+						legend.position = if (clear_sky_comparison) "bottom" else "right",
+						legend.text = element_text(size = 7),
+						plot.caption = element_text(size = 7),
 					plot.title = element_text(face = "bold", size = 10),
 					plot.subtitle = element_text(size = 8),
 					axis.text.x = element_text(size = 7),
@@ -865,6 +896,7 @@ plot_qc_compare_pdf <- function(df_orig, df, vars,
 	dev.off()
 	
 	message("Saved: ", file_out)
+  invisible(all_plots)
 }
 
 #--------------------------------------------------
@@ -901,7 +933,8 @@ plot_qc_compare_pdf(
   chunk_size = 48 * 14,
   n_panel_per_page = 4,
   max_n_per_panel = 2000,
-  clear_sky_comparison = T
+  clear_sky_comparison = TRUE,
+  ppfd_slope = ppfd_shadow$slope
 )
 
 #################################################

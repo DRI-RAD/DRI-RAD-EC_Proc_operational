@@ -13,7 +13,10 @@ run_level5_ameriflux <- function(
   config_file = file.path(.amf_root, "meta_files", "file_directions_new.csv"),
   start = NULL, end = NULL, output_dir = NULL, dry_run = FALSE,
   unit_overrides = character(), extra_mapping = NULL, include_pi = TRUE,
-  make_plots = TRUE) {
+  make_plots = TRUE, processed_dir = NULL) {
+  # Optional L1-L4 root from run_pipeline(output_dir=...). The existing output_dir
+  # argument still controls only where standalone AmeriFlux exports are written.
+  processed_dir <- pipeline_output_root(processed_dir, "processed_dir")
   if (!is.logical(make_plots) || length(make_plots) != 1L || is.na(make_plots))
     stop("make_plots must be TRUE or FALSE.")
   # start/end select inclusive LOCAL-STANDARD interval-end observations.
@@ -28,14 +31,15 @@ run_level5_ameriflux <- function(
   reports <- list()
   for (site in sites) {
     row <- dirs[dirs$site == site, , drop = FALSE]
-    site_output <- pipeline_path(base_dir, row$dir_output)
+    site_output <- if (is.null(processed_dir)) pipeline_path(base_dir, row$dir_output) else
+      file.path(processed_dir, site)
     if (dir.exists(file.path(site_output, ".pipeline-lock"))) stop("Pipeline is writing this site; retry after it finishes: ", site)
     files <- pipeline_files(site_output, "Level_4_post_processed_data")
     if (!length(files)) stop("No Level 4 output for ", site)
     item <- pipeline_history(site_output, "Level_4_post_processed_data")
     prepared <- amf_prepare(item, start = start, end = end,
                             unit_overrides = unit_overrides, extra_mapping = extra_mapping,
-                            include_pi = include_pi)
+                            include_pi = include_pi, site = site)
     message(site, ": ", nrow(prepared$data), " half-hours; ", ncol(prepared$data) - 2L,
             " variables; ", sum(prepared$audit$status == "omitted"), " unit/mapping omissions.")
     omissions <- prepared$audit[prepared$audit$status == "omitted", c("source", "note"), drop = FALSE]

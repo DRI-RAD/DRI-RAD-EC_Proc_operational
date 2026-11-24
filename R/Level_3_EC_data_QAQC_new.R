@@ -468,10 +468,14 @@ if(site_id %in% c('EDVG', 'ERVA')){
   roi <- read_csv(pipeline_path(base_dir, dirs_use$dir_fetch))
   EC$LE_QC_fetch <- fetch_filter(as.data.frame(EC %>% mutate(timestamp = TIMESTAMP)),
                                  "FETCH_70", "WD", roi$Fetch)
+  # Preserve unassessed NA before the existing internal processing fallback.
+  # AmeriFlux polarity: 0 discard, 1 keep; this does not change PI flux masks.
+  EC$FETCH_FILTER <- pipeline_fetch_export_flag(EC$LE_QC_fetch)
   EC$LE_QC_fetch[is.na(EC$LE_QC_fetch)] <- 0
   
 } else{
   EC$LE_QC_fetch <- 0
+  EC$FETCH_FILTER <- NA_real_
 }
 EC$H_QC_fetch <- EC$LE_QC_fetch
 EC$FC_QC_fetch <- EC$LE_QC_fetch
@@ -794,6 +798,7 @@ EC_unit_final <- cbind(EC_unit,
 											))
 
 # Screen auxiliary EC quantities without altering LE/H/FC QC or MDS inputs.
+EC_unit_final$FETCH_FILTER <- c("1", "derived")
 # Append audit columns after flux flags to preserve data/unit column order.
 aux_qc <- pipeline_aux_qc(EC, EC_unit_final, "L3")
 EC <- aux_qc$data

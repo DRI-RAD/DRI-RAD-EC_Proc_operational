@@ -3,6 +3,10 @@ source("run_pipeline.R")
 data_root <- "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations"
 # Another computer can use, for example, data_root <- "D:/eddy_stations".
 
+# Optional custom output root; defaults remain in file_directions_new.csv.
+# run_pipeline(base_dir = data_root, output_dir = "D:/EC_results", dry_run = TRUE)
+# Results go to D:/EC_results/ECDP, D:/EC_results/ECSM, etc.
+
 # All seven sites. Every site's L1 finishes before L2 uses cross-site references.
 # For full-history rebuilding after an EddyPro rerun, use:
 # run_pipeline(base_dir = data_root, start = NULL, end = NULL,

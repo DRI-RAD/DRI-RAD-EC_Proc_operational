@@ -1,6 +1,7 @@
 # Run this stage through run_pipeline.R so period and output state are explicit.
 if (is.null(getOption("ec.pipeline"))) stop("Use run_pipeline() from run_pipeline.R.")
 pipeline_options <- getOption("ec.pipeline")
+source(file.path(.pipeline_root, "R", "pipeline_aux_qc.R"))
 
 ################################################################################
 #### Load library and meta data
@@ -54,6 +55,8 @@ load_latest_site <- function(site_id, dirs, base_dir) {
 	colnames(df) <- colnames(df_unit)
 	# Restrict input to the requested calculation window before processing.
 	df <- pipeline_slice(df)
+	# Also protect against older un-QCed donor L1 files during single-site runs.
+	for (v in intersect(c("P", "P_Bulk"), names(df))) df[[v]] <- pipeline_precip_range(df[[v]])
 	
 	return(df)
 }
@@ -435,7 +438,7 @@ plot_gapfilled_pdf <- function(df,
 	
 	stopifnot("TIMESTAMP" %in% names(df))
 	
-	vars_use <- c("TA_PI_F", "RH_PI_F", "SW_IN_PI_F", "LW_IN_PI_F", "P_PI_F")
+	vars_use <- c("TA_PI_F", "RH_PI_F", "SW_IN_PI_F", "PPFD_IN_PI_F", "LW_IN_PI_F", "P_PI_F")
 	
 	method_key <- c(
 		"0" = "Original",
@@ -565,7 +568,7 @@ plot_gapfilled_pdf <- function(df,
 ################################################################################
 #### PI variables & gap filling
 ################################################################################
-# To do (if there is needs): PPFD_PI_F
+# PPFD follows the SW_IN filling sequence, in photon flux units throughout.
 
 for(i in all_sites) {
 	df <- site_list[[i]]
@@ -577,12 +580,14 @@ for(i in all_sites) {
 					 RH_PI_F = RH_1_1_3,
 					 PA_PI_F = PA,
 					 SW_IN_PI_F = SW_IN,
+					 PPFD_IN_PI_F = PPFD_IN,
 					 LW_IN_PI_F = LW_IN,
 					 
 					 TA_PI_F_method = ifelse(!is.na(TA_1_1_3), 0, NA),
 					 RH_PI_F_method =  ifelse(!is.na(RH_1_1_3), 0, NA),
 					 PA_PI_F_method =  ifelse(!is.na(PA), 0, NA),
 					 SW_IN_PI_F_method =  ifelse(!is.na(SW_IN), 0, NA),
+					 PPFD_IN_PI_F_method =  ifelse(!is.na(PPFD_IN), 0, NA),
 					 LW_IN_PI_F_method =  ifelse(!is.na(LW_IN), 0, NA),
 					 
 					 ) %>%
@@ -593,12 +598,14 @@ for(i in all_sites) {
 					 RH_PI_F = zoo::na.approx(RH_PI_F, maxgap = 8, na.rm = FALSE),
 					 PA_PI_F = zoo::na.approx(PA_PI_F, maxgap = 8, na.rm = FALSE),
 					 SW_IN_PI_F = zoo::na.approx(SW_IN_PI_F, maxgap = 4, na.rm = FALSE),
+					 PPFD_IN_PI_F = zoo::na.approx(PPFD_IN_PI_F, maxgap = 4, na.rm = FALSE),
 					 LW_IN_PI_F = zoo::na.approx(LW_IN_PI_F, maxgap = 8, na.rm = FALSE),
 					 
 					 TA_PI_F_method = ifelse(is.na(TA_PI_F_method) & !is.na(TA_PI_F), 1, TA_PI_F_method),
 					 RH_PI_F_method = ifelse(is.na(RH_PI_F_method) & !is.na(RH_PI_F), 1, RH_PI_F_method),
 					 PA_PI_F_method = ifelse(is.na(PA_PI_F_method) & !is.na(PA_PI_F), 1, PA_PI_F_method),
 					 SW_IN_PI_F_method = ifelse(is.na(SW_IN_PI_F_method) & !is.na(SW_IN_PI_F), 1, SW_IN_PI_F_method),
+					 PPFD_IN_PI_F_method = ifelse(is.na(PPFD_IN_PI_F_method) & !is.na(PPFD_IN_PI_F), 1, PPFD_IN_PI_F_method),
 					 LW_IN_PI_F_method = ifelse(is.na(LW_IN_PI_F_method) & !is.na(LW_IN_PI_F), 1, LW_IN_PI_F_method)
 					 
 					 ) 
@@ -678,13 +685,13 @@ for(i in all_sites) {
 		)
 	}
 	
-	SW_IN_xvars <- intersect(c("SW_IN_2"), names(df_PI))
-	if (length(SW_IN_xvars) > 0) {
-		df_PI$SW_IN_PI_F <- fill_long_gap_reg(
+	PPFD_IN_xvars <- intersect(c("SW_IN"), names(df_PI))
+	if (length(PPFD_IN_xvars) > 0) {
+		df_PI$PPFD_IN_PI_F <- fill_long_gap_reg(
 			df = df_PI,
-			y_fill = "SW_IN_PI_F",
-			y_ref = "SW_IN",
-			x_vars = SW_IN_xvars,
+			y_fill = "PPFD_IN_PI_F",
+			y_ref = "PPFD_IN",
+			x_vars = PPFD_IN_xvars,
 			maxgap = 4,
 			window = 240,
 			min_train = 50,
@@ -694,7 +701,7 @@ for(i in all_sites) {
 	
 	
 	P_xvars <- intersect(c("P"), names(df_PI))
-	if (length(SW_IN_xvars) > 0) {
+	if (length(P_xvars) > 0) {
 		df_PI$P_PI_F <- fill_long_gap_reg(
 			df = df_PI,
 			y_fill = "P_PI_F",
@@ -708,11 +715,13 @@ for(i in all_sites) {
 	}
 	
 	
+	df_PI$P_PI_F <- pipeline_precip_range(df_PI$P_PI_F)
 	df_PI <- df_PI %>%
 	mutate(TA_PI_F_method = ifelse(is.na(TA_PI_F_method) & !is.na(TA_PI_F), 2, TA_PI_F_method),
 				 RH_PI_F_method = ifelse(is.na(RH_PI_F_method) & !is.na(RH_PI_F), 2, RH_PI_F_method),
 				 PA_PI_F_method = ifelse(is.na(PA_PI_F_method) & !is.na(PA_PI_F), 2, PA_PI_F_method),
 				 SW_IN_PI_F_method = ifelse(is.na(SW_IN_PI_F_method) & !is.na(SW_IN_PI_F), 2, SW_IN_PI_F_method),
+				 PPFD_IN_PI_F_method = ifelse(is.na(PPFD_IN_PI_F_method) & !is.na(PPFD_IN_PI_F), 2, PPFD_IN_PI_F_method),
 				 P_PI_F_method = ifelse(is.na(P_PI_F_method) & !is.na(P_PI_F), 2, P_PI_F_method)
 	) 
 	
@@ -771,6 +780,19 @@ for(i in all_sites) {
 		min_train = 50,
 		force_zero = TRUE
 	)
+
+	df_PI$PPFD_IN_PI_F <- fill_long_gap_reg_other_sites(
+		df_target = df_PI,
+		site_name = i,
+		site_list = site_list,
+		y_fill = "PPFD_IN_PI_F",
+		y_ref = "PPFD_IN",
+		x_var = "PPFD_IN",
+		maxgap = 4,
+		window = 480,
+		min_train = 50,
+		force_zero = TRUE
+	)
 	
 	df_PI$LW_IN_PI_F <- fill_long_gap_reg_other_sites(
 		df_target = df_PI,
@@ -803,6 +825,7 @@ for(i in all_sites) {
 					 RH_PI_F_method = ifelse(is.na(RH_PI_F_method) & !is.na(RH_PI_F), 3, RH_PI_F_method),
 					 PA_PI_F_method = ifelse(is.na(PA_PI_F_method) & !is.na(PA_PI_F), 3, PA_PI_F_method),
 					 SW_IN_PI_F_method = ifelse(is.na(SW_IN_PI_F_method) & !is.na(SW_IN_PI_F), 3, SW_IN_PI_F_method),
+					 PPFD_IN_PI_F_method = ifelse(is.na(PPFD_IN_PI_F_method) & !is.na(PPFD_IN_PI_F), 3, PPFD_IN_PI_F_method),
 					 LW_IN_PI_F_method = ifelse(is.na(LW_IN_PI_F_method) & !is.na(LW_IN_PI_F), 3, LW_IN_PI_F_method),
 					 P_PI_F_method = ifelse(is.na(P_PI_F_method) & !is.na(P_PI_F), 3, P_PI_F_method),
 		) 
@@ -846,6 +869,14 @@ for(i in all_sites) {
 		window_days = 5,
 		nmin = 3
 	)
+
+	df_PI$PPFD_IN_PI_F <- fill_mdc_local(
+		df = df_PI,
+		y_fill = "PPFD_IN_PI_F",
+		timestamp = "TIMESTAMP",
+		window_days = 5,
+		nmin = 3
+	)
 	
 	df_PI$LW_IN_PI_F <- fill_mdc_local(
 		df = df_PI,
@@ -879,11 +910,15 @@ for(i in all_sites) {
 		nmin = 3
 	)
 	
+	# Reject implausible predictions before the existing final zero fallback.
+	df_PI$P_PI_F <- pipeline_precip_range(df_PI$P_PI_F)
+	df_PI$P_PI_F_method[is.na(df_PI$P_PI_F)] <- NA_real_
 	df_PI <- df_PI %>%
 		mutate(TA_PI_F_method = ifelse(is.na(TA_PI_F_method) & !is.na(TA_PI_F), 4, TA_PI_F_method),
 					 RH_PI_F_method = ifelse(is.na(RH_PI_F_method) & !is.na(RH_PI_F), 4, RH_PI_F_method),
 					 PA_PI_F_method = ifelse(is.na(PA_PI_F_method) & !is.na(PA_PI_F), 4, PA_PI_F_method),
 					 SW_IN_PI_F_method = ifelse(is.na(SW_IN_PI_F_method) & !is.na(SW_IN_PI_F), 4, SW_IN_PI_F_method),
+					 PPFD_IN_PI_F_method = ifelse(is.na(PPFD_IN_PI_F_method) & !is.na(PPFD_IN_PI_F), 4, PPFD_IN_PI_F_method),
 					 LW_IN_PI_F_method = ifelse(is.na(LW_IN_PI_F_method) & !is.na(LW_IN_PI_F), 4, LW_IN_PI_F_method),
 					 
 					 P_PI_F = ifelse(is.na(P_PI_F), 0,P_PI_F),
@@ -1460,7 +1495,8 @@ df_unit <- data.frame(TIMESTAMP = c("TS",NA), TA_PI_F = c('deg C',"derived"),
 											RH_PI_F_method = c("#","derived"), PA_PI_F = c('kPa',"derived"), 
 											PA_PI_F_method = c("#","derived"), P_PI_F = c('mm',"derived"), 
 											P_PI_F_method = c("#","derived"), VPD_PI_F = c("hPa","derived"),
-											SW_IN_PI_F = c("W m-2","derived"), SW_IN_PI_F_method = c("#","derived"), 
+											SW_IN_PI_F = c("W m-2","derived"), SW_IN_PI_F_method = c("#","derived"),
+ PPFD_IN_PI_F = c("umolPhoton m-2 s-1","derived"), PPFD_IN_PI_F_method = c("#","derived"), 
 											LW_IN_PI_F = c("W m-2","derived"), LW_IN_PI_F_method = c("#","derived"), 
 											G_plate_sun = c("W m-2","derived"), SG_sun = c("W m-2","derived"), 
 											G_plate_shade = c("W m-2","derived"), SG_shade = c("W m-2","derived"),
@@ -1477,7 +1513,7 @@ for(i in all_sites) {
 	
 	df_use <- df %>%
 		select(TIMESTAMP, TA_PI_F, TA_PI_F_method, RH_PI_F, RH_PI_F_method, 
-					 PA_PI_F, PA_PI_F_method, P_PI_F, P_PI_F_method, VPD_PI_F, SW_IN_PI_F, SW_IN_PI_F_method, 
+					 PA_PI_F, PA_PI_F_method, P_PI_F, P_PI_F_method, VPD_PI_F, SW_IN_PI_F, SW_IN_PI_F_method, PPFD_IN_PI_F, PPFD_IN_PI_F_method, 
 					 LW_IN_PI_F, LW_IN_PI_F_method, G_plate_sun, SG_sun, G_plate_shade, 
 					 SG_shade, G_plate, SG, G_sun_calorimetric, G_shade_calorimetric, 
 					 G_sun_leuning, G_shade_leuning, G_calorimetric, G_leuning, G_PI

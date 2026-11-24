@@ -1,6 +1,8 @@
 # Level 5: curated AmeriFlux submission export
 
-The exporter uses an explicit allowlist of AmeriFlux physical quantities plus the PI-requested final tower-team products. It does not export every Level 4 column. The PI reports Data Team agreement to include filled, EBC-corrected and LI-710 products with comments. At the PI's request, this exporter explicitly labels tower estimates with `_PI`; `_PI` and custom `_CORR` naming should be reviewed with the Data Team (the published qualifier guide reserves `_PI` for network use).
+Observation columns come first, grouped by physical-variable family with numeric sensor indices sorted numerically. All tower products follow: filled and corrected fluxes, filled meteorology, and calculated G/SG. CSV, variable_mapping.csv, coverage.csv and HTML diagnostics share this order.
+
+Submitted headers omit `_PI`, which is assigned by the network. `_F` denotes gap-filled data. `_CORR` is retained as a custom tower energy-balance correction label for Data Team review, not a standardized qualifier. The PI reports acceptance of these product types with comments. L4 source names and values are unchanged; the mapping records the original source names. `include_pi` retains its existing option name for compatibility.
 
 `run_pipeline()` exports the complete saved L4 after the L4 stage, even when no new rows are pending. `export_ameriflux = FALSE` skips this. To regenerate only L5:
 
@@ -11,17 +13,18 @@ files <- run_level5_ameriflux(base_dir = data_root)
 
 | Export | Source / processing |
 |---|---|
-| LE_1_1_1, H_1_1_1, FC | Raw EC, L3 despike/physical-range and fetch masks only; no SSITC mask, storage or filling |
+| LE_1_1_1, H_1_1_1, FC | Raw EC, L3 despike/physical-range masks only; fetch provided separately; no SSITC mask, storage or filling |
 | LE_1_1_2, H_1_1_2 | LE_710_filtered, H_710_filtered; L3 diagnostic, despike, long-run and flow QC applied in L4 |
-| LE_PI_F_1_1_1, H_PI_F_1_1_1, FC_PI_F | Final L4 filled EC products; includes available storage, so FC_PI_F includes SC where available |
-| LE_PI_F_1_1_2, H_PI_F_1_1_2 | Final L4 filled LI-710 products; no EC storage addition |
-| LE_PI_CORR_1_1_1, H_PI_CORR_1_1_1 | Final EC filled and EBR-corrected products |
-| LE_PI_CORR_1_1_2, H_PI_CORR_1_1_2 | Final LI-710 filled and EBR-corrected products |
+| LE_F_1_1_1, H_F_1_1_1, FC_F | Final L4 filled EC products; includes available storage, so FC_PI_F includes SC where available |
+| LE_F_1_1_2, H_F_1_1_2 | Final L4 filled LI-710 products; no EC storage addition |
+| LE_CORR_1_1_1, H_CORR_1_1_1 | Final EC filled and EBR-corrected products |
+| LE_CORR_1_1_2, H_CORR_1_1_2 | Final LI-710 filled and EBR-corrected products |
+| FETCH_FILTER | EDVG/ERVA only; L3 footprint flag, 0 discard / 1 keep / NA unassessed. Base EC flux is not fetch-filtered; PI F/CORR retain filtering |
 | SLE_1_1_1, SH_1_1_1, SC | Separate storage estimates; never add again to filled fluxes |
 | LE_SSITC_TEST_1_1_1, H_SSITC_TEST_1_1_1, FC_SSITC_TEST, TAU_SSITC_TEST | Standard SSITC tests, separate from flux masks |
 | G_1_1_1, G_1_1_2, ... | Individual L1 QAQC heat-flux plates; source suffix retained |
-| G_PI | L2 G_PI before gap filling; selected surface estimate including above-plate storage |
-| SG_PI | L2 weighted SG; do not add again to G_PI |
+| G | L2 G_PI before gap filling; selected surface estimate including above-plate storage |
+| SG | L2 weighted SG; do not add again to G_PI |
 | TS_1_1_4 through TS_1_1_6 | TS_CS65X_1_1_1 through TS_CS65X_1_1_3; CS65x source recorded in metadata |
 | SECA_1_1_1 through SECA_1_1_3 | cs65x_ec_1_1_1 through cs65x_ec_1_1_3; apparent soil conductivity, dS m-1 |
 | WS_1_1_1, WD_1_1_1, WS_MAX_1_1_1 | EC wind quantities |
@@ -29,9 +32,9 @@ files <- run_level5_ameriflux(base_dir = data_root)
 | TA_1_1_4, RH_1_1_4, PA_1_1_2 | Retained LI-710 meteorology; no filling |
 | PA_1_1_1 | Retained primary pressure |
 | P_1_1_1, P_1_1_2 | Bulk and tipping-bucket precipitation before filling |
-| P_PI_F_1_1_1 | Final selected/filled precipitation, including zero fallback |
-| TA_PI_F, RH_PI_F, PA_PI_F, VPD_PI_F, SW_IN_PI_F, LW_IN_PI_F | L2 filled/derived meteorology |
-| NETRAD_PI_F | L4 MDS-filled net radiation |
+| P_F_1_1_1 | Final selected/filled precipitation, including zero fallback |
+| TA_F, RH_F, PA_F, VPD_F, SW_IN_F, LW_IN_F | L2 filled/derived meteorology |
+| NETRAD_F | L4 MDS-filled net radiation |
 
 Other explicitly mapped radiation, indexed TA/RH/TS/SWC, turbulence, gas concentrations and footprint variables are retained. Units and source scripts for **every exported column** are in `metadata/variable_mapping.csv`. Fixed sensor slots do not shift when another sensor is absent; conflicts fail explicitly. Sensor positional indices must be confirmed against site sensor metadata; the PI has confirmed EC and LI-710 flux sensors are collocated at the same height.
 
@@ -97,3 +100,13 @@ install beyond the pipeline's existing readr dependency. Generating a PNG for
 every variable adds runtime and disk space. Individual plot errors are recorded
 in the summary/HTML; a report-level error produces a warning and
 `diagnostic_error.txt` while preserving the committed CSV.
+
+
+`PPFD_IN_F` is sourced from L2 `PPFD_IN_PI_F`, retained in L4, in
+umolPhoton m-2 s-1. It uses the SW_IN filling sequence (short interpolation,
+same-site observed SW_IN regression, other-site PPFD regression, local mean
+diurnal filling). The separate `PPFD_IN` column remains unfilled and includes
+L1 recurring-shadow QC: at least 20% and 80 W m-2 below SW_IN after diagnostic
+scaling, SW_IN >= 100 W m-2, same half-hour slot for at least five consecutive days.
+The internal filling-method column is not submitted. Filled PPFD is included in
+the final tower-product block and its per-variable diagnostics.

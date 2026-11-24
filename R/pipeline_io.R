@@ -1,3 +1,17 @@
+# Resolve an optional output root before the runner changes working directory.
+# Validation never creates folders, so dry runs remain read-only.
+pipeline_output_root <- function(path, argument = "output_dir") {
+  if (is.null(path)) return(NULL)
+  if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(trimws(path)))
+    stop(argument, " must be NULL or one nonempty directory path.")
+  path <- chartr("\\", "/", path.expand(path))
+  if (grepl("^[A-Za-z]:($|[^/])", path)) stop(argument, ": use a full drive path, e.g. D:/results.")
+  if (!grepl("^([A-Za-z]:/|/)", path)) path <- file.path(getwd(), path)
+  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  if (file.exists(path) && !dir.exists(path)) stop(argument, " is a file, not a directory: ", path)
+  path
+}
+
 # Shared ingestion, period planning, and versioned output for the new pipeline.
 # Scientific QAQC and gap-filling calculations remain in the Level_*_new.R files.
 
@@ -119,9 +133,31 @@ pipeline_le_quality_columns <- function() {
 
 pipeline_output_schema <- function(item, pattern) {
   item <- pipeline_uncertainty_schema(item, pattern)
+  # New PPFD products are unknown in older snapshots until reprocessed.
+  if (tolower(pattern) %in% c("level_2_pi_vars_logger_data", "level_4_post_processed_data")) {
+    for (v in c("PPFD_IN_PI_F", "PPFD_IN_PI_F_method")) if (!v %in% names(item$data)) {
+      item$data[[v]] <- rep(NA_real_, nrow(item$data))
+      item$units[[v]] <- c(if (v == "PPFD_IN_PI_F") "umolPhoton m-2 s-1" else "#",
+                           rep("derived", nrow(item$units)-1L))
+    }
+  }
+  if (tolower(pattern) %in% c("level_1_qaqced_logger_data", "level_4_post_processed_data") && "PPFD_IN" %in% names(item$data)) {
+    shadow_units <- c(PPFD_IN_pre_shadow="umolPhoton m-2 s-1", PPFD_IN_SW_scaled="W m-2", PPFD_IN_QC_shadow="1")
+    for (name in names(shadow_units)) if (!name %in% names(item$data)) {
+      item$data[[name]] <- rep(NA_real_,nrow(item$data))
+      item$units[[name]] <- if(name=="PPFD_IN_pre_shadow") item$units$PPFD_IN else
+        c(shadow_units[[name]],rep("derived",nrow(item$units)-1L))
+    }
+  }
+  if (tolower(pattern) %in% c("level_3_ec_with_qaqc", "level_4_post_processed_data") &&
+      !"FETCH_FILTER" %in% names(item$data)) {
+    # Old internal fetch flags collapsed NA to zero; do not invent assessed passes.
+    item$data$FETCH_FILTER <- rep(NA_real_, nrow(item$data))
+    item$units$FETCH_FILTER <- c("1", rep("derived", nrow(item$units)-1L))
+  }
   # Align historical snapshots with auxiliary-QC audit columns without claiming
   # that old rows passed the new checks. Reprocessing supplies actual raw/flags.
-  aux_l1 <- c("TA_710", "RH_710", "PA_710", "WS_05103_5s_Max")
+  aux_l1 <- c("P", "P_Bulk", "TA_710", "RH_710", "PA_710", "WS_05103_5s_Max")
   aux_l3 <- c("WS_MAX", "CO2", "H2O", "CO2_SIGMA", "H2O_SIGMA")
   aux <- switch(tolower(pattern), level_1_qaqced_logger_data = aux_l1,
     level_3_ec_with_qaqc = aux_l3,

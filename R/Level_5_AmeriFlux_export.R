@@ -44,6 +44,25 @@ amf_convert <- function(x, from, to, variable, difference = FALSE) {
   stop(variable, ": unsupported unit '", from, "' -> '", to, "'. Supply an explicit unit override after review.")
 }
 
+# Keep each physical-variable family together; positional indices sort numerically.
+# Names and values never change, only their published order.
+amf_column_order <- function(columns, processed = character()) {
+  vars <- setdiff(columns, c("TIMESTAMP_START", "TIMESTAMP_END"))
+  family <- sub("_[0-9]+_[0-9]+_[0-9]+$", "", vars)
+  family <- sub("(_PI)?_(F|CORR)$|_PI$", "", family)
+  family <- sub("_(SIGMA|SSITC_TEST|MAX)$", "", family)
+  family[grepl("^FETCH_", family)] <- "FETCH"
+  product <- ifelse(grepl("_CORR($|_)", vars),3L,ifelse(grepl("_F($|_)",vars),2L,ifelse(grepl("_PI($|_)",vars),1L,0L)))
+  tower <- vars %in% processed | product > 0L
+  core <- sub("_[0-9]+_[0-9]+_[0-9]+$", "", vars)
+  indices <- t(vapply(vars,function(v) {
+    if(!grepl("_[0-9]+_[0-9]+_[0-9]+$",v)) return(c(0,0,0))
+    as.numeric(tail(strsplit(v,"_",fixed=TRUE)[[1]],3))
+  },numeric(3)))
+  c(intersect(c("TIMESTAMP_START","TIMESTAMP_END"),columns),
+    vars[order(tower,match(family,unique(family)),product,core,indices[,1],indices[,2],indices[,3])])
+}
+
 amf_mapping <- function(columns) {
   # source, destination, and target unit; only unambiguous existing names are
   # included automatically. Instrument-specific nonstandard names are reported.
@@ -53,7 +72,7 @@ amf_mapping <- function(columns) {
     out <<- rbind(out, data.frame(source, target, unit, note, stringsAsFactors = FALSE))
   }
   for (v in c("NETRAD", "SW_IN", "SW_OUT", "LW_IN", "LW_OUT")) add(v, unit = "W m-2")
-  add("PPFD_IN", unit = "umolPhoton m-2 s-1")
+  add("PPFD_IN", unit = "umolPhoton m-2 s-1", note = "L1 QAQC including recurring PPFD deficit screening against independent SW_IN; no gap filling or scaling of the submitted PPFD units")
   add("ALB", unit = "%")
   add("PA", unit = "kPa")
   add("P_Bulk", "P_1_1_1", "mm", "L1 bulk precipitation (Pluvio or corrected SG400); no L2 gap filling")
@@ -100,13 +119,14 @@ amf_mapping <- function(columns) {
   out[out$source %in% columns, , drop = FALSE]
 }
 
-amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE, local_standard_time = TRUE,
+amf_prepare <- function(item, flux_qc = "despike", include_storage = TRUE, local_standard_time = TRUE,
                         start = NULL, end = NULL, unit_overrides = character(),
-                        extra_mapping = NULL, include_pi = TRUE) {
+                        extra_mapping = NULL, include_pi = TRUE, site = NULL) {
   if (!is.logical(include_pi) || length(include_pi) != 1L || is.na(include_pi))
     stop("include_pi must be TRUE or FALSE.")
   if (!isTRUE(local_standard_time)) stop("Confirm local standard time (no DST) and interval-end timestamps first.")
-  flux_qc <- match.arg(flux_qc, "despike_fetch")
+  flux_qc <- match.arg(flux_qc, "despike")
+  if (!is.null(site) && (!is.character(site) || length(site) != 1L || is.na(site))) stop("site must be NULL or one site ID.")
   if (!is.logical(include_storage) || length(include_storage) != 1L || is.na(include_storage))
     stop("include_storage must be TRUE or FALSE.")
   x <- as.data.frame(item$data)
@@ -137,14 +157,14 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
     if (!v %in% names(item$units)) return(NA_character_)
     as.character(item$units[[v]][1])
   }
-  # Apply ONLY the PI-requested despike/physical-range and fetch masks to the
+  # Apply ONLY the PI-requested despike/physical-range masks to the
   # retained raw turbulent flux. filtered1 already includes unwanted extra masks.
   for (v in c("LE", "H", "FC")) {
     src <- v
     if (!src %in% names(x)) stop("Required raw turbulent flux column missing: ", src)
     to <- if (v == "FC") "umolCO2 m-2 s-1" else "W m-2"
     values <- amf_convert(x[[src]], input_unit(src), to, src)
-    for (flag in paste0(v, c("_QC_despike", "_QC_fetch"))) {
+    for (flag in paste0(v, "_QC_despike")) {
       if (!flag %in% names(x)) stop("Required QC column missing: ", flag)
       if (!is.numeric(x[[flag]]) && !is.logical(x[[flag]])) stop("Nonnumeric QC flag: ", flag)
       # Unassessed NA flags do not imply rejection, matching existing despike
@@ -154,8 +174,25 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
     target <- if (v %in% c("LE", "H")) paste0(v, "_1_1_1") else v
     result[[target]] <- values
     record(src, target, input_unit(src), to, "exported", paste(flux_qc,
-      "only; no SSITC, signal-strength, long-run or USTAR mask; no storage addition/filling/EBR; unassessed despike flags:",
-      sum(is.na(x[[paste0(v, "_QC_despike")]])), "; unassessed fetch flags:", sum(is.na(x[[paste0(v, "_QC_fetch")]]))))
+      "only; no fetch, SSITC, signal-strength, long-run or USTAR mask; no storage addition/filling/EBR; unassessed despike flags:",
+      sum(is.na(x[[paste0(v, "_QC_despike")]]))))
+  }
+  # AmeriFlux FETCH_FILTER has the reverse polarity of internal *_QC_fetch:
+  # 0 discard, 1 keep. Supply only at sites where footprint screening applies.
+  if (!is.null(site) && site %in% c("EDVG", "ERVA")) {
+    needed <- c("LE_QC_fetch", "H_QC_fetch", "FC_QC_fetch", "WD", "FETCH_70")
+    if (!all(needed %in% names(x))) stop("Missing fetch metadata for ", site, ": ", paste(setdiff(needed,names(x)),collapse=", "))
+    flag <- x$LE_QC_fetch
+    if (any(!is.na(flag) & !flag %in% c(0,1,2))) stop("Unexpected internal fetch flag values for ", site)
+    if (!identical(flag,x$H_QC_fetch) || !identical(flag,x$FC_QC_fetch)) stop("Flux fetch flags disagree for ", site)
+    flag <- if ("FETCH_FILTER" %in% names(x)) x$FETCH_FILTER else rep(NA_real_,nrow(x))
+    if (any(!is.na(flag) & !flag %in% c(0,1))) stop("Unexpected FETCH_FILTER values for ",site)
+    # Historical L3 coerces unassessed fetch flags to zero. Missing footprint
+    # or direction must not therefore be presented as an assessed pass.
+    flag[!is.finite(x$WD) | !is.finite(x$FETCH_70) | x$FETCH_70 < 0 | x$WD < 0 | x$WD > 360] <- NA_real_
+    result$FETCH_FILTER <- flag
+    record("FETCH_FILTER", "FETCH_FILTER", "1", "1", "exported",
+      "EDVG/ERVA footprint test; 0=discard, 1=keep, missing=unassessed. Internal H/FC fetch flags agree. Flag only: base flux is not fetch-filtered; final PI products retain existing fetch QC.")
   }
   mapping <- amf_mapping(names(x))
   # LI710 uses the existing unfilled L4 result of L3 diagnostic, physical-range/
@@ -195,6 +232,9 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
       else if (pi_sources[j] == "NETRAD_PI_F")
         "L4 MDS-filled net radiation; separate from retained NETRAD observations"
       else "L2 variable-specific filled meteorology; separate from L1 QAQC observations; VPD derives from filled TA/RH"))
+  if (include_pi && "PPFD_IN_PI_F" %in% names(x)) mapping <- rbind(mapping,
+    data.frame(source = "PPFD_IN_PI_F", target = "PPFD_IN_PI_F", unit = "umolPhoton m-2 s-1",
+      note = "L2 PPFD: short interpolation, same-site observed SW regression, other-site PPFD regression, then local mean diurnal filling; photon flux units, not SW-scaled irradiance"))
   if (include_storage) {
     for (v in intersect(c("SLE", "SH", "SC"), names(x))) {
       mapping <- rbind(mapping, data.frame(source = v, target = if (v %in% c("SLE", "SH")) paste0(v, "_1_1_1") else v,
@@ -255,11 +295,25 @@ amf_prepare <- function(item, flux_qc = "despike_fetch", include_storage = TRUE,
   }, character(1))
   audit$source_scripts <- vapply(seq_len(nrow(audit)), function(i) {
     stage <- audit$source_stage[i]; src <- audit$source[i]
+    if (src == "PPFD_IN") return("R/Level_1_met_QAQC_new.R; R/pipeline_ppfd_shadow.R")
     if (stage == "L4") return("R/Level_4_gapfilling_ET_calculation_new.R (retained L1-L3 inputs)")
     if (startsWith(stage,"L2")) return("R/Level_2_met_PI_vars_new.R; R/Level_4_gapfilling_ET_calculation_new.R for energy-driver MDS")
     if (startsWith(stage,"L3")) return(if (grepl("710",src)) "R/Level_3_LI710_QAQC_new.R; L4 flag application" else "R/Level_3_EC_data_QAQC_new.R; L4 storage screening; L5 base-flux mask")
     "R/Level_1_met_QAQC_new.R"
   }, character(1))
+  # _PI is assigned by the network, not by the submitting tower team. Keep
+  # original L4 source names in the audit, and move all tower products to the end.
+  strip_pi <- function(v) gsub("_PI(?=_|$)", "", v, perl = TRUE)
+  processed <- strip_pi(names(result)[grepl("_PI($|_)", names(result))])
+  export_names <- strip_pi(names(result))
+  if (anyDuplicated(export_names)) stop("Duplicate export variable after removing _PI.")
+  names(result) <- export_names
+  audit$target <- strip_pi(audit$target)
+  result <- result[,amf_column_order(names(result), processed),drop=FALSE]
+  # Mapping and coverage tables use the exact same order as the CSV/HTML.
+  audit <- audit[order(ifelse(audit$status=="exported",0L,1L),
+    match(audit$target,names(result)),seq_len(nrow(audit))),,drop=FALSE]
+  rownames(audit) <- NULL
   list(data = result, audit = audit,
        summary = data.frame(variable = names(result)[-(1:2)],
          observations = vapply(result[-(1:2)], function(v) sum(is.finite(v)), integer(1)),
@@ -286,14 +340,14 @@ amf_write <- function(prepared, site, output_dir) {
   write.csv(prepared$summary, file.path(staged, "metadata", "coverage.csv"), row.names = FALSE)
   comments <- c("AMERIFLUX SUBMISSION COMMENTS",
     "Curated observations plus explicitly requested tower-team final products; see metadata/variable_mapping.csv for every source and unit.",
-    "PI and CORR labels are deliberately supplied at the PI's request for Data Team review; they do not assert network processing or standard submission qualifier approval.",
+    "The network assigns _PI; submitted headers omit it. _F denotes tower gap filling. CORR is a custom tower EBC label for Data Team review, not a standardized qualifier. Tower products follow all observation columns.",
     "TIMESTAMP_START/END: local standard time, no DST; 30-minute intervals. Use registered site ID in final upload filename.",
-    "EC LE/H: _1_1_1; collocated equal-height LI710 LE/H: _1_1_2. Base EC applies despike/physical range and fetch only; no storage addition. Base LI710 uses L4 unfilled QC results.",
-    "LE_PI_F/H_PI_F: existing final MDS-filled series. EC filled products include available storage; LI710 does not. FC_PI_F includes SC where available. Never add storage again.",
-    "LE_PI_CORR/H_PI_CORR: existing filled and energy-balance-corrected series, separately indexed for EC and LI710. CORR denotes tower correction, not ONEFlux processing.",
-    "G_i_j_k: individual plates. G_PI: unfilled selected L2 surface heat flux including soil storage. SG_PI: weighted L2 above-plate storage. Never add SG_PI to G_PI again. No sun/shade or alternative method components exported.",
-    "P_1_1_1: bulk; P_1_1_2: tipping bucket; P_PI_F_1_1_1: L2 selected and filled precipitation, including zero fallback.",
-    "Meteorological observations precede filling; *_PI_F are final filled products. NETRAD_PI_F includes L4 MDS filling.",
+    "EC LE/H: _1_1_1; collocated equal-height LI710 LE/H: _1_1_2. Base EC applies despike/physical range only; fetch is a separate flag; no storage addition. Base LI710 uses L4 unfilled QC results.",
+    "LE_F/H_F: existing final MDS-filled series. EC filled products include available storage; LI710 does not. FC_F includes SC where available. Never add storage again.",
+    "LE_CORR/H_CORR: existing filled and energy-balance-corrected series, separately indexed for EC and LI710. CORR denotes tower correction, not ONEFlux processing.",
+    "G_i_j_k: individual plates. G: unfilled selected L2 surface heat flux including soil storage. SG: weighted L2 above-plate storage. Never add SG to G again. No sun/shade or alternative method components exported.",
+    "P_1_1_1: bulk; P_1_1_2: tipping bucket; P_F_1_1_1: L2 selected and filled precipitation, including zero fallback.",
+    "Meteorological observations precede filling; *_F are final filled products. NETRAD_F includes L4 MDS filling.",
     "CS65x temperature uses TS_1_1_4 through TS_1_1_6; conductivity uses SECA_1_1_1 through SECA_1_1_3. LI710 TA/RH use replicate 4 and PA replicate 2. 05103 wind uses replicate 2. Confirm positional indices against site sensor metadata.",
     "Instrument source names are recorded in metadata, not used as export variable base names. No internal QC/method codes, raw LI710 flux duplicates, MDS predictions, storage-added intermediates, VBR/RE or signal-strength columns are exported.")
   writeLines(comments, file.path(staged, "README.txt"))

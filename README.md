@@ -1,5 +1,77 @@
 # DRI-RAD Eddy Covariance Processing Pipeline
 
+## PPFD shadow diagnostics and screening
+
+After ordinary L1 QC, PPFD is scaled to SW-equivalent W m-2 by a through-origin
+regression `SW_IN = slope * PPFD_IN`. Training uses SW_IN >= 100 and positive
+PPFD, with at least 100 pairs spanning five dates. Before fitting, SW/PPFD ratios
+outside median +/- max(3*MAD, 20% of median) are excluded to reduce local-shadow
+influence. The scale is a diagnostic conversion, not a change to saved PPFD units.
+
+A PPFD observation is removed only when its scaled value is at least 20% AND
+80 W m-2 below SW_IN, with SW_IN >= 100, at the same half-hour clock slot on at
+least five consecutive calendar dates. All qualifying points within a confirmed
+run are removed. A missing/invalid or nondeficit day breaks the run. SW_IN is
+never altered by this check. Interval midpoints determine day/clock assignment;
+the pipeline's local-standard timestamps are not converted to UTC time.
+
+The existing `*_Level_1_Figure_met_QAQC_SW_IN_details.pdf` now shows SW_IN before
+QC (gray), SW_IN reference (black), clear-sky radiation (orange), regression-scaled
+PPFD (blue), and removed PPFD points (magenta). Flagged points are retained during
+plot downsampling. The regression slope appears in the figure caption.
+
+L1/L4 retain `PPFD_IN_pre_shadow` (original PPFD units), `PPFD_IN_SW_scaled`
+(W m-2), and `PPFD_IN_QC_shadow` (1 removed, 0 assessed and retained, NA unassessed).
+The pipeline period audit records fit slope, fit-pair count and removed-row count.
+L5 exports only the filtered `PPFD_IN` in its original units, with updated source
+notes; the extra diagnostic columns remain internal. L2's PPFD-derived SW donor
+will consequently exclude the flagged points.
+
+Incremental L1 runs use up to 14 days of existing L1 radiation as context for
+this check only, restoring pre-shadow PPFD where available. Other L1 QC windows
+are unchanged. Previously published rows are not retroactively replaced: a run
+first confirmed on its fifth day changes only currently processed rows. Reprocess
+the full affected period to backfill earlier flags and downstream products.
+Without sufficient valid training data, scaling/flags remain NA and no new
+removal occurs. This is a repeatable shadow-suspicion rule, not proof of shading;
+persistent spectral/calibration differences can also satisfy it. Widespread
+shading can bias the regression despite robust preselection. Review the plots.
+
+## AmeriFlux variable ordering
+
+All sensor replicates and PI products of each variable family are contiguous.
+For example: TA_1_1_1, TA_1_1_2, TA_1_1_3, TA_1_1_4, TA_PI_F. Positional indices
+sort numerically, not lexically. Existing names, instrument assignments and values
+are unchanged. CSV columns, metadata/variable_mapping.csv exported rows,
+metadata/coverage.csv, diagnostic HTML and variable_summary.csv share this order.
+Existing exports must be regenerated with L5 to adopt the new ordering.
+
+## Optional output location
+
+`run_pipeline(output_dir = NULL)` preserves the configured `dir_output` defaults.
+To use another location, set `output_dir = "D:/EC_results"`. Each selected site
+gets its own subfolder (`D:/EC_results/ECDP`, etc.), containing L1-L4 CSVs,
+archives, period summaries, figures, and automatic AmeriFlux exports/diagnostics.
+`base_dir` still locates the raw inputs. The configuration CSV is not modified.
+Relative output paths resolve against the caller's working directory, before
+the runner changes folders. A dry run does not create output directories.
+
+History and upstream results for selected sites are read from the chosen output
+location, so a fresh location starts a new processing history. Existing output
+files are not automatically copied or moved. For single-site L2 processing,
+non-target reference sites still use their configured existing L1 outputs.
+To use custom-location donors too, include those sites in the target run.
+
+```r
+run_pipeline(base_dir = data_root, output_dir = "D:/EC_results")
+# Later, regenerate only L5 from that custom L4 location:
+run_level5_ameriflux(base_dir = data_root, processed_dir = "D:/EC_results")
+```
+
+The standalone `run_level5_ameriflux(output_dir=...)` option retains its existing
+meaning: destination of AmeriFlux exports only. Use `processed_dir` to select
+the custom L4 input root.
+
 This repository processes logger and EddyPro data for NICE NET (DRI) eddy
 covariance sites: ECDP, EDVG, EDVP, ERVA, ERVP, ECSM, and ESTW. It runs meteorological
 QAQC, multi-site meteorological gap filling, EC and LI-710 QAQC, REddyProc MDS
@@ -11,19 +83,19 @@ L4 period. `dry_run = TRUE` only previews this step; runs excluding L4 do not
 export. Use `export_ameriflux = FALSE` to disable it explicitly.
 The default export (`include_pi = TRUE`) includes unfilled observations,
 EC/LI-710 filled and EBR-corrected products, individual soil heat plates,
-unfilled `G_PI`/`SG_PI`, and final filled meteorology. An explicit allowlist
+unfilled `G`/`SG`, and final filled meteorology. An explicit allowlist
 excludes intermediate calculations, internal QC/method codes, VBR/RE and
 instrument diagnostics. CS65x temperature/conductivity and 05103/LI-710
 meteorology use standard physical quantities with numeric sensor qualifiers.
-EC filled LE/H use `LE_PI_F_1_1_1`/`H_PI_F_1_1_1`; they retain L4 storage and MDS.
-Corrected EC/LI-710 products use `LE_PI_CORR_...`/`H_PI_CORR_...` labels.
-The PI explicitly requests these PI/CORR labels for Data Team review.
+EC filled LE/H use `LE_F_1_1_1`/`H_F_1_1_1`; they retain L4 storage and MDS.
+Corrected EC/LI-710 products use `LE_CORR_...`/`H_CORR_...` labels.
+The network assigns `_PI`; submitted headers omit it. `_F` is allowed for tower-filled data; `_CORR` remains a custom EBC label for Data Team review. All tower products are placed after observation columns. L4 source names and values are unchanged.
 The PI reports Data Team acceptance of these product types with submission comments;
 each export includes `submission_comments.txt` and column-level provenance.
 Base meteorology is from L1 QC before L2 filling. Bulk/tipping-bucket precipitation use
-`P_1_1_1`/`P_1_1_2`; `P_PI_F_1_1_1` is the separate L2 filled precipitation series.
+`P_1_1_1`/`P_1_1_2`; `P_F_1_1_1` is the separate L2 filled precipitation series.
 EC LE/H use `_1_1_1`; LI-710 LE/H use `_1_1_2`, with their L4 MDS-filled results
-separately labeled `LE_PI_F_1_1_2`/`H_PI_F_1_1_2`. EC filled products include available
+separately labeled `LE_F_1_1_2`/`H_F_1_1_2`. EC filled products include available
 storage and must not be interpreted as turbulent-only fluxes. Scientific
 calculations are unchanged. Sensor indices describe the confirmed collocated,
 equal-height parallel instruments and should agree with submitted site metadata.
@@ -32,8 +104,7 @@ To export existing Level 4 results independently, use
 `run_level5_ameriflux(base_dir = data_root)`. All seven sites are selected by
 default. The exporter preserves the input files. See
 [Level 5 instructions and variable mapping](AMERIFLUX_LEVEL5.md), including
-the requested flux QC policy and the distinction between local `_PI` review
-columns and final AmeriFlux submission labels.
+the requested flux QC policy and source-to-export variable mapping.
 
 EddyPro random uncertainties (`LE_rand_err`, `H_rand_err`, `FC_rand_err`,
 `TAU_rand_err`) are retained in L3 and carried unchanged into L4. Existing older
@@ -519,14 +590,16 @@ No MAD despiking or comparison between different anemometers is applied.
 All-missing, fewer-than-four-valid and zero-IQR samples skip the statistical
 envelope. No fixed wind upper bound is invented.
 
-L3 CO2/H2O means and SIGMA (standard deviations, not variances) receive only
-minimal sanity checks: negative, nonfinite and missing-code values are removed.
-There is no arbitrary upper bound, long-run test or statistical despiking for
-these gas quantities. This is not comprehensive analyzer QAQC.
+L3 CO2/H2O means and SIGMA (standard deviations, not variances) receive initial
+physical sanity checks: negative, nonfinite and missing-code values are removed.
+A range-only Q1-10*IQR to Q3+10*IQR test is additionally applied separately to
+each gas mean and standard deviation within the L3 calculation window. No MAD
+despiking, long-run test or flux flag is applied. Fewer than four valid values
+or zero IQR skip the statistical range test. This is not comprehensive analyzer QAQC.
 
 The screened result keeps its original name, with `<variable>_raw` preserving
 the pre-check values and `<variable>_QC_aux` recording the reason (0 retained,
-1 invalid/physical range, 2 repeated run, 4 wind IQR; NA already missing).
+1 invalid/physical range, 2 repeated run, 4 IQR range; NA already missing).
 These audit columns and their units propagate to L4 but are excluded from L5's
 allowlist. L5 thus exports the already-screened values without additional QC.
 Reprocess L1 through L4 before regenerating L5. L2 can no longer use rejected
@@ -550,3 +623,49 @@ per input file to kPa, deg C and percent before merging; unknown units stop the
 read rather than silently combining incompatible values. L1 QC then applies.
 Reprocess L1 onward to recover the historical meteorology and its downstream
 gap-filling effects. Flux reading remains unchanged.
+
+## Fetch flag, gas range checks and precipitation limits
+
+L3 preserves FETCH_FILTER before the historical internal NA-to-zero fallback:
+AmeriFlux 0 = discard, 1 = keep, NA = unassessed. L5 exports it only for EDVG and
+ERVA. Base EC LE/H/FC now applies despike/physical-range flags only, with neither
+fetch nor SSITC rejection. Existing PI filled and corrected products keep their
+original L4 fetch filtering. Old snapshots have unknown FETCH_FILTER until L3
+and L4 are reprocessed; internal zero flags cannot recover lost NA status.
+Definition: https://ameriflux.lbl.gov/data/aboutdata/data-variables/
+
+L3 CO2/H2O means and standard deviations use k=10 IQR range-only screening
+after negative/nonfinite removal. Configure `gas_iqr_k` in pipeline_aux_qc if
+scientifically justified. The initial choice of 10 is deliberately less
+aggressive than 4, especially for right-skewed standard deviations. Bounds are
+computed over the current calculation window, so changing the window can change
+the bounds. Original values and reason flags remain available in *_raw/*_QC_aux.
+H2O and H2O_SIGMA screening can affect the downstream VBR-Ts calculation.
+
+L1 screens P (tipping bucket) and P_Bulk separately to 0--500 mm per half-hour
+inclusive before L2 filling. Rejected observations become NA, not 500 or zero.
+L2 screens legacy donor observations too, then retains the existing bulk-first
+selection (ERVA uses tipping bucket) and same-site tipping-bucket regression
+fill, followed by the existing other-site methods. Both unfilled QCed observation
+streams remain in L1/L4; P_PI_F is the separate filled product. Predictions are
+range-checked as well. The existing final zero fallback remains; it is recorded
+by P_PI_F_method=4 and does not turn a rejected observation into a measured zero.
+500 mm is a permissive gross-error ceiling, not a realistic rainfall threshold.
+
+Run tests/test_fetch_gas_precip.R, tests/test_aux_qc.R and tests/test_ameriflux.R.
+Reprocess L1 onward for all changes; L5 alone cannot recover new upstream QC.
+
+
+PPFD gap filling follows the L2 SW_IN sequence: interpolation of gaps up to four
+half-hours, same-site through-origin regression against observed SW_IN (240-record
+window; at least 50 training pairs), other-site PPFD regression (480-record window;
+at least 50 training pairs), then local mean diurnal filling (5-day window, at
+least 3 values). Insufficient data may leave gaps. The measured PPFD_IN is retained;
+PPFD_IN_PI_F and PPFD_IN_PI_F_method are saved in L2 and carried into L4.
+Method codes are 0 observed, 1 interpolation, 2 same-site regression, 3 other-site
+regression, and 4 mean diurnal filling. The filled quantity remains in
+umolPhoton m-2 s-1, not the W m-2 units used only for shadow diagnostics.
+AmeriFlux exports PPFD_IN_F in the final tower-product block, with PPFD_IN as the
+separate unfilled observation. Reprocess L1 onward to apply the 80 W m-2 shadow
+threshold and populate historical filled PPFD; older snapshots get unknown (NA)
+new fields until reprocessed.

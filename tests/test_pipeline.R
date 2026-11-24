@@ -1,6 +1,6 @@
 # Run from the project root: Rscript tests/test_pipeline.R
 # Temporary fixtures exercise I/O and orchestration without modifying NAS data.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 # These orchestration fixtures intentionally have only a dummy value column.
 # The real exporter is exercised separately in test_ameriflux.R.
 run_level5_ameriflux <- function(sites, base_dir, config_file) {

@@ -1,5 +1,5 @@
 # Synthetic tests: export semantics, unit conversions, timestamp and file format.
-source("run_level5_ameriflux.R", encoding = "UTF-8")
+source("R/run_level5_ameriflux.R", encoding = "UTF-8")
 fail <- function(expr) stopifnot(inherits(tryCatch(force(expr), error = identity), "error"))
 t <- pipeline_time(c("2024-02-28 23:30:00", "2024-02-29 00:00:00", "2024-02-29 01:00:00"))
 d <- data.frame(TIMESTAMP = t, processing = c("EddyPro", "EasyFlux", "EddyPro"),
@@ -49,13 +49,13 @@ stopifnot(nrow(x)==4, x$TIMESTAMP_START[2]=='202402282330', x$TIMESTAMP_END[3]==
   abs(x$T_SONIC[1]-26.85)<1e-9,x$T_SONIC[2]==25,x$T_SONIC_SIGMA[1]==2,
   !'TS_1_1_1'%in%names(x),
   all(c('G','SG','LE_F_1_1_1','LE_F_1_1_2') %in% names(x)),
-  x$LE_F_1_1_1[2]==220, x$H_F_1_1_1[2]==40, x$FC_F[2]==5,
+  x$LE_F_1_1_1[2]==220, x$H_F_1_1_1[2]==40, !'FC_F' %in% names(x),
   is.na(x$LE_F_1_1_1[3]), !any(c('LE','H') %in% names(x)),
   x$LE_1_1_2[1]==90, x$H_1_1_2[4]==27,
   x$LE_F_1_1_2[2]==180, x$H_F_1_1_2[2]==18,
   x$P_1_1_1[1]==2, x$P_1_1_2[1]==1, is.na(x$P_1_1_1[2]),
   is.na(x$P_1_1_2[2]), x$P_F_1_1_1[2]==0,
-  !'P' %in% names(x), 'FC_F' %in% names(x), 'LE_F_1_1_1' %in% names(x),
+  !'P' %in% names(x), !'FC_F' %in% names(x), 'LE_F_1_1_1' %in% names(x),
   is.na(x$LE_1_1_2[2]), is.na(x$SW_IN[2]),
   any(p$audit$source=='TS_1_1_1' & p$audit$status=='omitted'))
 review <- amf_prepare(item, include_pi=TRUE)$data
@@ -98,7 +98,7 @@ written<-run_level5_ameriflux('ECSM',base_dir=dir,config_file=config)
 stopifnot(file.exists(written$ECSM),identical(hash,tools::md5sum(input)))
 # Automatic export still runs when L4 has no pending observations. It exports
 # the complete cumulative period, not just the bounds of this pipeline call.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 for (stage in c("L1", "L2", "L3_EC")) {
   pipeline_write_table(d, rbind(u,u),
     file.path(site_dir, paste0("ECSM_", pipeline_patterns[[stage]], "_test.csv")), "test")
@@ -162,4 +162,7 @@ stopifnot(!any(grepl("_PI($|_)", names(ep$data))),
  any(ep$audit$source == "G_PI" & ep$audit$target == "G"))
 tower <- names(ep$data) %in% c("G", "SG") | grepl("_(F|CORR)($|_)", names(ep$data))
 stopifnot(!any(diff(as.integer(tower)) < 0))
+
+
+stopifnot(!'FC_F' %in% names(review), !'FC_F' %in% names(minimal), !any(p$audit$target == 'FC_F' & p$audit$status == 'exported'), identical(item$data$FC_PI_F, d$FC_PI_F))
 

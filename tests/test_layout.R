@@ -4,7 +4,7 @@ project <- normalizePath(".", winslash = "/")
 scratch <- tempfile("layout-test-")
 dir.create(scratch)
 setwd(scratch)
-source(file.path(project, "run_pipeline.R"))
+source(file.path(project, "R", "run_pipeline.R"))
 stopifnot(identical(.pipeline_root, project))
 stopifnot(all(file.exists(file.path(.pipeline_root, pipeline_stages))))
 stopifnot(identical(eval(formals(run_pipeline)$sites),

@@ -1,5 +1,5 @@
 # Run from the repository root. All rotation tests use temporary local files.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 root <- tempfile("publication-tests-"); dir.create(root)
 out <- file.path(root, "out"); dir.create(out)
 stage <- file.path(root, "stage"); dir.create(file.path(stage, "figures"), recursive = TRUE)

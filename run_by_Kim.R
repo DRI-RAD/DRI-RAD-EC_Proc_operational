@@ -1,5 +1,5 @@
 # Preview examples. Only the first example runs; uncomment one alternative.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 data_root <- "Z:/NWI/Task_3_Water_Use_ET_and_Meteoroligical_Monitoring/networks/eddy_stations"
 # Another computer can use, for example, data_root <- "D:/eddy_stations".
 

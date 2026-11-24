@@ -210,15 +210,17 @@ amf_prepare <- function(item, flux_qc = "despike", include_storage = TRUE, local
   if (!include_pi) mapping <- mapping[mapping$source != "G_PI", , drop = FALSE]
   # Retain existing EC MDS products with explicit storage provenance. Data Team
   # correspondence permits submission of tower-filled/corrected products with comments.
-  # include_pi controls the OTHER local PI products, not these three columns.
-  ec_filled <- c("LE_PI_F", "H_PI_F", "FC_PI_F")
+  # include_pi controls the OTHER local PI products, not these two columns.
+  # FC_PI_F remains in L4 but is not submitted: its filling does not use the
+  # standard ustar-filtered carbon-flux workflow. Retain observed FC and SC.
+  ec_filled <- c("LE_PI_F", "H_PI_F")
   # Keep filled and corrected estimates distinct from unfilled turbulent flux.
-  pi_sources <- c("LE_PI_F", "H_PI_F", "FC_PI_F", "NETRAD_PI_F", 
+  pi_sources <- c("LE_PI_F", "H_PI_F", "NETRAD_PI_F", 
                   "TA_PI_F", "RH_PI_F", "PA_PI_F", "VPD_PI_F", "SW_IN_PI_F", "LW_IN_PI_F", "P_PI_F",
                   "LE_PI_CORR", "H_PI_CORR", "LE_710_PI_CORR", "H_710_PI_CORR")
-  pi_units <- c("W m-2", "W m-2", "umolCO2 m-2 s-1", "W m-2",
+  pi_units <- c("W m-2", "W m-2", "W m-2",
                 "deg C", "%", "kPa", "hPa", "W m-2", "W m-2", "mm", "W m-2", "W m-2", "W m-2", "W m-2")
-  pi_targets <- c("LE_PI_F_1_1_1", "H_PI_F_1_1_1", "FC_PI_F", "NETRAD_PI_F",
+  pi_targets <- c("LE_PI_F_1_1_1", "H_PI_F_1_1_1", "NETRAD_PI_F",
                   "TA_PI_F", "RH_PI_F", "PA_PI_F", "VPD_PI_F", "SW_IN_PI_F", "LW_IN_PI_F", "P_PI_F_1_1_1",
                   "LE_PI_CORR_1_1_1", "H_PI_CORR_1_1_1", "LE_PI_CORR_1_1_2", "H_PI_CORR_1_1_2")
   # P_PI_F already has an explicit PI-labeled mapping above.
@@ -227,8 +229,8 @@ amf_prepare <- function(item, flux_qc = "despike", include_storage = TRUE, local
     data.frame(source = pi_sources[j], target = pi_targets[j], unit = pi_units[j],
       note = if (grepl("710_PI_CORR", pi_sources[j]))
         "L4 LI710 QAQC + MDS + energy-balance correction; no EC storage added; custom CORR label documented for submission"
-      else if (pi_sources[j] %in% c("LE_PI_F", "H_PI_F", "FC_PI_F", "LE_PI_CORR", "H_PI_CORR"))
-        "L4 EC full QAQC + available storage (turbulent fallback when storage absent) + MDS; CORR additionally applies EBR correction. Do not add storage again. FC_PI_F is storage-inclusive NEE where SC exists"
+      else if (pi_sources[j] %in% c("LE_PI_F", "H_PI_F", "LE_PI_CORR", "H_PI_CORR"))
+        "L4 EC full QAQC + available storage (turbulent fallback when storage absent) + MDS; CORR additionally applies EBR correction. Do not add storage again."
       else if (pi_sources[j] == "NETRAD_PI_F")
         "L4 MDS-filled net radiation; separate from retained NETRAD observations"
       else "L2 variable-specific filled meteorology; separate from L1 QAQC observations; VPD derives from filled TA/RH"))
@@ -343,7 +345,8 @@ amf_write <- function(prepared, site, output_dir) {
     "The network assigns _PI; submitted headers omit it. _F denotes tower gap filling. CORR is a custom tower EBC label for Data Team review, not a standardized qualifier. Tower products follow all observation columns.",
     "TIMESTAMP_START/END: local standard time, no DST; 30-minute intervals. Use registered site ID in final upload filename.",
     "EC LE/H: _1_1_1; collocated equal-height LI710 LE/H: _1_1_2. Base EC applies despike/physical range only; fetch is a separate flag; no storage addition. Base LI710 uses L4 unfilled QC results.",
-    "LE_F/H_F: existing final MDS-filled series. EC filled products include available storage; LI710 does not. FC_F includes SC where available. Never add storage again.",
+    "LE_F/H_F: existing final MDS-filled series. EC filled products include available storage; LI710 does not. Never add storage again.",
+    "FC_F is excluded because L4 FC_PI_F does not use the standard ustar-filtered carbon-flux filling workflow. Observed FC and separate SC remain available.",
     "LE_CORR/H_CORR: existing filled and energy-balance-corrected series, separately indexed for EC and LI710. CORR denotes tower correction, not ONEFlux processing.",
     "G_i_j_k: individual plates. G: unfilled selected L2 surface heat flux including soil storage. SG: weighted L2 above-plate storage. Never add SG to G again. No sun/shade or alternative method components exported.",
     "P_1_1_1: bulk; P_1_1_2: tipping bucket; P_F_1_1_1: L2 selected and filled precipitation, including zero fallback.",

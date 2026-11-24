@@ -1,6 +1,6 @@
 # Run the real Level 4 MDS and all six diagnostic figures.
 # Uses temporary synthetic upstream products; never reads the network data root.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 root <- tempfile("level4-smoke-")
 dir.create(root)
 t <- seq(pipeline_time("2026-05-01 00:30"), by = 1800, length.out = 110*48)

@@ -1,5 +1,23 @@
 # DRI-RAD Eddy Covariance Processing Pipeline
 
+## Which file should I run?
+
+Open `DRI-RAD-EC_Proc_operational.Rproj`, then open your launcher:
+
+| Researcher | File | Data drive | Default processing |
+|---|---|---|---|
+| Kim | `run_by_Kim.R` | Z: | Existing personal settings retained |
+| Larsen | `run_by_Larsen.R` | W: | New periods only (`reprocess = FALSE`) |
+| Jasoni | `run_by_Jasoni.R` | Y: | New periods only (`reprocess = FALSE`) |
+
+The Larsen/Jasoni launchers run all seven sites. Edit `data_root` if your mapping
+has a different directory suffix. `output_root <- NULL` preserves configured
+site output folders; replace it with a custom directory if desired. The commented
+examples cover preview, a single site, a date range, L4 only, and AmeriFlux only.
+Shared function definitions live under `R/`; sourcing them alone starts no processing.
+`run_all.R` and `run_example.R` have been removed to avoid competing entry points.
+
+
 ## PPFD shadow diagnostics and screening
 
 After ordinary L1 QC, PPFD is scaled to SW-equivalent W m-2 by a through-origin
@@ -100,7 +118,7 @@ storage and must not be interpreted as turbulent-only fluxes. Scientific
 calculations are unchanged. Sensor indices describe the confirmed collocated,
 equal-height parallel instruments and should agree with submitted site metadata.
 To export existing Level 4 results independently, use
-`source("run_level5_ameriflux.R")` followed by
+`source("R/run_level5_ameriflux.R")` followed by
 `run_level5_ameriflux(base_dir = data_root)`. All seven sites are selected by
 default. The exporter preserves the input files. See
 [Level 5 instructions and variable mapping](AMERIFLUX_LEVEL5.md), including
@@ -177,9 +195,11 @@ Package installation is normally required only once. Do not put
 
 ```text
 DRI-RAD-EC_Proc_operational.Rproj   RStudio project
-run_pipeline.R                     Main runner and options
-run_all.R                          Immediate all-site run
-run_example.R                      All-site and single-site examples
+run_by_Kim.R                       Kim's existing execution settings
+run_by_Larsen.R                    W: drive, incremental execution and examples
+run_by_Jasoni.R                    Y: drive, incremental execution and examples
+R/run_pipeline.R                   Main runner and options
+R/run_level5_ameriflux.R            Standalone export from saved Level 4
 R/                                 Scientific stages and shared I/O
 meta_files/file_directions_new.csv Site paths
 meta_files/manual_flag.csv         Manual QAQC flags
@@ -235,7 +255,7 @@ coverage. Keep only the intended full-output runs below each configured folder.
 ### Reprocess all seven sites after rerunning EddyPro
 
 ```r
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 run_pipeline(base_dir = data_root, start = NULL, end = NULL,
              reprocess = TRUE, dry_run = TRUE)
 # After reviewing the plan:
@@ -258,7 +278,7 @@ retained. This does not delete historical output files to start over.
 Loading the runner does not start processing:
 
 ```r
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 ```
 
 Preview all seven sites without writing output:
@@ -277,9 +297,9 @@ The default order is Level 1 for all selected sites, then Level 2 for all sites,
 then Level 3 EC, Level 3 LI-710, and Level 4. Sites run sequentially within each
 stage. This order ensures that Level 2 uses current multi-site Level 1 data.
 
-`source("run_all.R")` starts the all-site run immediately. Edit `data_root` near
-the top of that file first. New users should preview through `run_pipeline()`
-before using this shortcut.
+Open the project .Rproj and use your run_by_Larsen.R or run_by_Jasoni.R launcher.
+Each has one active incremental all-site run and commented alternatives.
+Set dry_run = TRUE in the active call to preview first.
 
 ## Select a period
 
@@ -347,8 +367,8 @@ run_pipeline(
 )
 ```
 
-`run_example.R` includes editable all-site and single-site examples. Only the
-first uncommented `run_pipeline()` call runs.
+The researcher launchers include single-site, period, L4-only and standalone
+AmeriFlux examples. Comment out the main call before enabling an alternative.
 
 ## Level 4 MDS context
 

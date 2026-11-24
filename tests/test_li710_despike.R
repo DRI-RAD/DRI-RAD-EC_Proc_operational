@@ -1,5 +1,5 @@
 # Regression cases for openeddy's empty/undersized day/night subsets.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 n <- 735L
 t <- seq(pipeline_time("2026-07-16 17:00"), by = 1800, length.out = n)
 sun <- pmax(0, sin(2*pi*(seq_len(n) %% 48)/48))

@@ -1,8 +1,8 @@
 # Source this file, then call run_level5_ameriflux(). No processing starts on source.
 # This exporter reads existing Level 4 snapshots; it does not rerun QAQC or MDS.
 .amf_sources <- Filter(Negate(is.null), lapply(sys.frames(), function(x) x$ofile))
-.amf_script <- if (length(.amf_sources)) tail(.amf_sources, 1)[[1]] else "run_level5_ameriflux.R"
-.amf_root <- dirname(normalizePath(.amf_script, winslash = "/", mustWork = TRUE))
+.amf_script <- if (length(.amf_sources)) tail(.amf_sources, 1)[[1]] else "R/run_level5_ameriflux.R"
+.amf_root <- dirname(dirname(normalizePath(.amf_script, winslash = "/", mustWork = TRUE)))
 source(file.path(.amf_root, "R", "pipeline_io.R"), encoding = "UTF-8")
 source(file.path(.amf_root, "R", "Level_5_AmeriFlux_export.R"), encoding = "UTF-8")
 source(file.path(.amf_root, "R", "Level_5_AmeriFlux_diagnostics.R"), encoding = "UTF-8")

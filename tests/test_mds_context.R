@@ -1,5 +1,5 @@
 # Test 100-day windows independently of expensive scientific calculations.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 t <- seq(pipeline_time("2026-01-01 00:30"), by = 1800, length.out = 150 * 48)
 plan <- pipeline_plan(t, NULL, start = t[140*48+1], end = tail(t, 1))
 expanded <- pipeline_mds_window(plan, t)

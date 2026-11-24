@@ -7,7 +7,7 @@ Submitted headers omit `_PI`, which is assigned by the network. `_F` denotes gap
 `run_pipeline()` exports the complete saved L4 after the L4 stage, even when no new rows are pending. `export_ameriflux = FALSE` skips this. To regenerate only L5:
 
 ```r
-source("run_level5_ameriflux.R")
+source("R/run_level5_ameriflux.R")
 files <- run_level5_ameriflux(base_dir = data_root)
 ```
 
@@ -15,7 +15,7 @@ files <- run_level5_ameriflux(base_dir = data_root)
 |---|---|
 | LE_1_1_1, H_1_1_1, FC | Raw EC, L3 despike/physical-range masks only; fetch provided separately; no SSITC mask, storage or filling |
 | LE_1_1_2, H_1_1_2 | LE_710_filtered, H_710_filtered; L3 diagnostic, despike, long-run and flow QC applied in L4 |
-| LE_F_1_1_1, H_F_1_1_1, FC_F | Final L4 filled EC products; includes available storage, so FC_PI_F includes SC where available |
+| LE_F_1_1_1, H_F_1_1_1 | Final L4 filled EC energy fluxes; includes available storage |
 | LE_F_1_1_2, H_F_1_1_2 | Final L4 filled LI-710 products; no EC storage addition |
 | LE_CORR_1_1_1, H_CORR_1_1_1 | Final EC filled and EBR-corrected products |
 | LE_CORR_1_1_2, H_CORR_1_1_2 | Final LI-710 filled and EBR-corrected products |
@@ -110,3 +110,6 @@ L1 recurring-shadow QC: at least 20% and 80 W m-2 below SW_IN after diagnostic
 scaling, SW_IN >= 100 W m-2, same half-hour slot for at least five consecutive days.
 The internal filling-method column is not submitted. Filled PPFD is included in
 the final tower-product block and its per-variable diagnostics.
+
+FC_F is excluded from the submission because the L4 carbon-flux filling does not use the standard ustar-filtered workflow. FC_PI_F remains unchanged in L4; observed FC and separate SC remain in the export.
+

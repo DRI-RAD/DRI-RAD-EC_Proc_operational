@@ -1,4 +1,4 @@
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 root <- tempfile("li710-sources-"); dir.create(root)
 t <- seq(pipeline_time("2026-07-01 00:00"), by = 1800, length.out = 4)
 units_for <- function(x) as.data.frame(setNames(lapply(names(x), function(n) c("unit", "avg")), names(x)))

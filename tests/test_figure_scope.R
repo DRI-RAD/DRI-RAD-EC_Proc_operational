@@ -1,5 +1,5 @@
 # Exercise the actual Level 2 figure call and function without its science loop.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 suppressPackageStartupMessages({ library(tidyverse); library(cowplot) })
 root <- tempfile("figure-scope-"); dir.create(file.path(root, "figures"), recursive = TRUE)
 exprs <- parse(pipeline_stages[["L2"]])

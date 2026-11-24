@@ -1,4 +1,4 @@
-source('run_pipeline.R')
+source('R/run_pipeline.R')
 fail<-function(expr) stopifnot(inherits(tryCatch(force(expr),error=identity),'error'))
 stopifnot(is.null(pipeline_output_root(NULL)))
 for(v in list(NA_character_,'',c('a','b'),TRUE,'C:relative')) fail(pipeline_output_root(v))

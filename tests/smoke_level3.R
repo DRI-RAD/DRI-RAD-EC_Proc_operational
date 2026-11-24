@@ -1,6 +1,6 @@
 # Exercise the actual Level 3 EC adapter and its unchanged QAQC using synthetic
 # half-hour observations. Run from the project root: Rscript tests/smoke_level3.R
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 root <- tempfile("level3-smoke-")
 dir.create(root)
 t <- seq(pipeline_time("2026-08-01 00:30"), pipeline_time("2026-09-01 00:00"), by = 1800)

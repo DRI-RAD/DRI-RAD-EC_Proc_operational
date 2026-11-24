@@ -1,5 +1,5 @@
 # Actual LI710 ingestion -> QC -> figures -> publication with no usable flux.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 root <- tempfile("li710-smoke-"); dir.create(root)
 t <- seq(pipeline_time("2026-07-16 17:00"), by = 1800, length.out = 735)
 units_for <- function(x) as.data.frame(setNames(lapply(names(x), function(n) c("unit", "avg")), names(x)))

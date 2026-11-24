@@ -1,4 +1,4 @@
-source('run_pipeline.R')
+source('R/run_pipeline.R')
 root <- tempfile('uncertainty-schema-'); dir.create(root)
 t <- pipeline_time(c('2026-01-01 00:30','2026-01-01 01:00'))
 old <- list(data=data.frame(TIMESTAMP=t[1], LE=10),

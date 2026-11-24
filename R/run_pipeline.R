@@ -4,13 +4,13 @@
 .pipeline_script <- if (length(.pipeline_sources)) tail(.pipeline_sources, 1)[[1]] else NA_character_
 if (!length(.pipeline_script) || is.na(.pipeline_script)) {
   .pipeline_arg <- grep("^--file=", commandArgs(), value = TRUE)
-  .pipeline_script <- if (length(.pipeline_arg)) sub("^--file=", "", .pipeline_arg[1]) else "run_pipeline.R"
+  .pipeline_script <- if (length(.pipeline_arg)) sub("^--file=", "", .pipeline_arg[1]) else "R/run_pipeline.R"
 }
-.pipeline_root <- dirname(normalizePath(.pipeline_script, winslash = "/", mustWork = TRUE))
+.pipeline_root <- dirname(dirname(normalizePath(.pipeline_script, winslash = "/", mustWork = TRUE)))
 source(file.path(.pipeline_root, "R", "pipeline_io.R"))
 source(file.path(.pipeline_root, "R", "pipeline_li710.R"))
 source(file.path(.pipeline_root, "R", "pipeline_level4_figures.R"))
-source(file.path(.pipeline_root, "run_level5_ameriflux.R"), encoding = "UTF-8")
+source(file.path(.pipeline_root, "R", "run_level5_ameriflux.R"), encoding = "UTF-8")
 
 pipeline_stages <- c(
   L1 = "R/Level_1_met_QAQC_new.R",

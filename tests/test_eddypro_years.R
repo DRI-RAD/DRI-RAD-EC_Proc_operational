@@ -1,5 +1,5 @@
 # Run from the repository root. Synthetic CSVs never access production inputs.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 root <- tempfile("eddypro-years-")
 dir.create(root)
 fields <- c("date", "time", "LE", "qc_LE", "H", "qc_H", "co2_flux", "qc_co2_flux", "Tau", "qc_Tau",

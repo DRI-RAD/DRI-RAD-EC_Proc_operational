@@ -1,5 +1,5 @@
 # Synthetic orchestration plus actual LI710 QAQC; no network data are modified.
-source("run_pipeline.R")
+source("R/run_pipeline.R")
 # Clock-only fixtures do not contain scientific export variables.
 run_level5_ameriflux <- function(sites, ...) setNames(list("clock-fixture-export"), sites)
 root <- tempfile("end-alignment-"); dir.create(root)

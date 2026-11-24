@@ -1,4 +1,4 @@
-source('run_level5_ameriflux.R')
+source('R/run_level5_ameriflux.R')
 source('R/pipeline_aux_qc.R')
 stopifnot(identical(pipeline_fetch_export_flag(c(0,2,1,NA_real_)),c(1,0,0,NA_real_)))
 raw_flag<-openeddy::fetch_filter(data.frame(FETCH_70=c(10,100,NA),WD=c(0,0,0)),
